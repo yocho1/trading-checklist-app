@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { X, Upload } from 'lucide-react';
 import CurrencyPairSelector from './CurrencyPairSelector';
 import { useTradeCalculations } from '../../hooks/useTradeCalculations';
+import { auth } from '../../utils/auth'; // Add this import
 
 const SaveTradeModal = ({ isOpen, onClose, confluenceScore }) => {
   const [formData, setFormData] = useState({
@@ -27,8 +28,16 @@ const SaveTradeModal = ({ isOpen, onClose, confluenceScore }) => {
       return;
     }
 
+    // Get current user
+    const user = auth.getCurrentUser();
+    if (!user) {
+      alert('Please log in to save trades');
+      return;
+    }
+
     const newTrade = {
       id: Date.now().toString(),
+      userId: user.id, // Use user ID
       currencyPair: formData.currencyPair,
       direction: formData.direction,
       confluenceScore: confluenceScore,
@@ -46,10 +55,11 @@ const SaveTradeModal = ({ isOpen, onClose, confluenceScore }) => {
       chartImage: formData.chartImage
     };
 
-    // Save to localStorage
-    const existingTrades = JSON.parse(localStorage.getItem('savedTrades') || '[]');
+    // Save to user-specific localStorage
+    const userTradesKey = `savedTrades_${user.id}`; // User-specific key
+    const existingTrades = JSON.parse(localStorage.getItem(userTradesKey) || '[]');
     const updatedTrades = [...existingTrades, newTrade];
-    localStorage.setItem('savedTrades', JSON.stringify(updatedTrades));
+    localStorage.setItem(userTradesKey, JSON.stringify(updatedTrades)); // Fix: use userTradesKey
 
     // Reset form and close modal
     setFormData({

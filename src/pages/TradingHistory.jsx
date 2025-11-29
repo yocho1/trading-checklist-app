@@ -1,6 +1,7 @@
 // src/pages/TradingHistory.jsx
 import React, { useState, useEffect } from 'react';
 import { Filter, Search, Edit, Trash2, Eye, ArrowLeft } from 'lucide-react';
+import { auth } from '../utils/auth'; // Add this import
 
 const TradingHistory = () => {
   const [trades, setTrades] = useState([]);
@@ -9,8 +10,12 @@ const TradingHistory = () => {
 
   // Load trades from localStorage on component mount
   useEffect(() => {
-    const savedTrades = JSON.parse(localStorage.getItem('savedTrades') || '[]');
-    setTrades(savedTrades);
+    const user = auth.getCurrentUser();
+    if (user) {
+      const userTradesKey = `savedTrades_${user.id}`;
+      const savedTrades = JSON.parse(localStorage.getItem(userTradesKey) || '[]');
+      setTrades(savedTrades);
+    }
   }, []);
 
   // Filter trades based on selected filter and search term
@@ -22,17 +27,25 @@ const TradingHistory = () => {
   });
 
   const deleteTrade = (id) => {
+    const user = auth.getCurrentUser();
+    if (!user) return;
+    
+    const userTradesKey = `savedTrades_${user.id}`;
     const updatedTrades = trades.filter(trade => trade.id !== id);
     setTrades(updatedTrades);
-    localStorage.setItem('savedTrades', JSON.stringify(updatedTrades));
+    localStorage.setItem(userTradesKey, JSON.stringify(updatedTrades));
   };
 
   const updateTradeStatus = (id, newStatus) => {
+    const user = auth.getCurrentUser(); // Add this
+    if (!user) return;
+    
+    const userTradesKey = `savedTrades_${user.id}`; // Add this
     const updatedTrades = trades.map(trade => 
       trade.id === id ? { ...trade, status: newStatus } : trade
     );
     setTrades(updatedTrades);
-    localStorage.setItem('savedTrades', JSON.stringify(updatedTrades));
+    localStorage.setItem(userTradesKey, JSON.stringify(updatedTrades)); // Fix this line
   };
 
   const goBackToChecklist = () => {
