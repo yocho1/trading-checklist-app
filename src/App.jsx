@@ -3,7 +3,6 @@ import React, { useState, useEffect } from 'react';
 import { Save, History, LogOut, User } from 'lucide-react';
 
 // Components
-import { Header } from './components/layout/Header'; // Remove this import if not used
 import { ScoreCard } from './components/layout/ScoreCard';
 import { ChecklistSection } from './components/checklist/ChecklistSection';
 import SaveTradeModal from './components/modals/SaveTradeModal';
@@ -22,12 +21,43 @@ const TradingChecklistApp = () => {
   const [checkedItems, setCheckedItems] = useState({});
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [currentView, setCurrentView] = useState('checklist');
-  const [authView, setAuthView] = useState('login'); // 'login' or 'register'
+  const [authView, setAuthView] = useState('login');
   
   const { totalScore, timeframeScores } = useScoreCalculator(checkedItems);
   
-  // Destructure googleLogin from useAuth hook
   const { user, login, register, verifyEmail, resendVerificationCode, googleLogin, logout, loading } = useAuth();
+
+  // Debug logging
+  useEffect(() => {
+    console.log('=== AUTH STATE DEBUG ===');
+    console.log('User:', user);
+    console.log('Loading:', loading);
+    console.log('Auth View:', authView);
+    console.log('========================');
+  }, [user, loading, authView]);
+
+  useEffect(() => {
+    // Initialize shared data structure if it doesn't exist
+    const existingData = localStorage.getItem('trading_app_shared_data');
+    if (!existingData) {
+      localStorage.setItem('trading_app_shared_data', JSON.stringify({
+        users: [
+          {
+            id: '1',
+            name: 'Demo User',
+            email: 'demo@example.com',
+            password: 'password123',
+            isVerified: true,
+            createdAt: new Date().toISOString(),
+            authProvider: 'email',
+          }
+        ],
+        verificationCodes: {},
+        trades: []
+      }));
+      console.log('Shared data initialized for cross-browser compatibility');
+    }
+  }, []);
 
   // Initialize all items as unchecked
   useEffect(() => {
@@ -71,36 +101,40 @@ const TradingChecklistApp = () => {
     );
   }
 
-  // Show auth pages if not logged in
-if (authView === 'login') {
-  return (
-    <Login 
-      onLogin={login} 
-      onSwitchToRegister={() => setAuthView('register')} 
-    />
-  );
-} else {
-  return (
-    <Register 
-      onRegister={register} 
-      onSwitchToLogin={() => setAuthView('login')}
-      onGoogleLogin={googleLogin}
-      onVerify={verifyEmail} // Make sure this is passed
-      onResendCode={resendVerificationCode} // Make sure this is passed
-    />
-  );
-}
+  // FIXED: Show auth pages if not logged in
+  if (!user) {
+    console.log('No user found, showing auth pages. Auth view:', authView);
+    if (authView === 'login') {
+      return (
+        <Login 
+          onLogin={login} 
+          onSwitchToRegister={() => setAuthView('register')}
+          onGoogleLogin={googleLogin}
+        />
+      );
+    } else {
+      return (
+        <Register 
+          onRegister={register} 
+          onSwitchToLogin={() => setAuthView('login')}
+          onGoogleLogin={googleLogin}
+          onVerify={verifyEmail}
+          onResendCode={resendVerificationCode}
+        />
+      );
+    }
+  }
 
-  // Rest of your component remains the same...
-  // Render Trading History View
+  console.log('User authenticated, showing main app. User:', user);
+
+  // Rest of your component for logged-in users...
   if (currentView === 'history') {
     return <TradingHistory />;
   }
 
-  // Render Main Checklist View
   return (
     <div className='min-h-screen bg-slate-900 text-slate-200'>
-      {/* Updated Header with User Info */}
+      {/* Your existing main app JSX */}
       <header className="bg-slate-800 border-b border-slate-700">
         <div className="max-w-5xl mx-auto px-4 py-4 flex justify-between items-center">
           <div className="flex items-center space-x-3">
@@ -114,7 +148,6 @@ if (authView === 'login') {
           </div>
           
           <div className="flex items-center gap-4">
-            {/* View Toggle */}
             <div className="bg-slate-700 rounded-lg p-1 flex">
               <button
                 onClick={() => setCurrentView('checklist')}
@@ -139,7 +172,6 @@ if (authView === 'login') {
               </button>
             </div>
 
-            {/* User Menu */}
             <div className="flex items-center gap-2">
               <div className="bg-slate-700 p-2 rounded-lg">
                 <User className="text-slate-300" size={16} />
@@ -163,7 +195,6 @@ if (authView === 'login') {
           getScoreText={getScoreText}
         />
 
-        {/* Checklist Sections */}
         <div className='grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8'>
           {CHECKLIST_DATA.map((section) => (
             <ChecklistSection
@@ -177,7 +208,6 @@ if (authView === 'login') {
           ))}
         </div>
 
-        {/* Confluence Summary */}
         <div className='bg-slate-800 rounded-xl border border-slate-700 p-6 mb-8 shadow-lg'>
           <h3 className='text-xl font-bold text-white mb-4'>
             Confluence Summary
@@ -207,7 +237,6 @@ if (authView === 'login') {
           </div>
         </div>
 
-        {/* Save Button */}
         <div className='text-center'>
           <button
             onClick={() => setShowSaveModal(true)}

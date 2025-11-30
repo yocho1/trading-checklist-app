@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { LogIn, Mail, Lock, AlertCircle } from 'lucide-react';
+import GoogleLoginButton from './GoogleLoginButton'; // Add this import
 
-const Login = ({ onLogin, onSwitchToRegister }) => {
+const Login = ({ onLogin, onSwitchToRegister, onGoogleLogin }) => { // Add onGoogleLogin prop
   const [formData, setFormData] = useState({
     email: '',
     password: ''
@@ -43,6 +44,32 @@ const Login = ({ onLogin, onSwitchToRegister }) => {
             <AlertCircle className="text-red-400" size={20} />
             <span className="text-red-400 text-sm">{error}</span>
           </div>
+        )}
+
+        {/* Google Sign In Button */}
+        {onGoogleLogin && (
+          <>
+            <GoogleLoginButton
+              onSuccess={async (response) => {
+                const result = await onGoogleLogin(response);
+                if (!result.success) {
+                  setError(result.error);
+                }
+              }}
+              onError={(error) => {
+                setError(error || 'Google login failed');
+              }}
+            />
+
+            <div className="relative my-6">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-slate-600"></div>
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-2 bg-slate-800 text-slate-400">Or continue with email</span>
+              </div>
+            </div>
+          </>
         )}
 
         {/* Login Form */}

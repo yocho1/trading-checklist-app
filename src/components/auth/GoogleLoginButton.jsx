@@ -1,3 +1,4 @@
+// src/components/auth/GoogleLoginButton.jsx
 import React, { useEffect, useRef } from 'react';
 
 const GoogleLoginButton = ({ onSuccess, onError }) => {
@@ -24,10 +25,9 @@ const GoogleLoginButton = ({ onSuccess, onError }) => {
 
     const initializeGoogle = () => {
       try {
-        // Use process.env for Create React App
         const clientId = process.env.REACT_APP_GOOGLE_CLIENT_ID;
         
-        console.log('Google Client ID:', clientId); // Add this for debugging
+        console.log('Google Client ID:', clientId);
         
         if (!clientId) {
           console.error('Google Client ID not found. Please set REACT_APP_GOOGLE_CLIENT_ID in your .env file');
@@ -43,19 +43,20 @@ const GoogleLoginButton = ({ onSuccess, onError }) => {
           },
           auto_select: false,
           cancel_on_tap_outside: true,
+          use_fedcm_for_prompt: false, // DISABLE FedCM
         });
 
         if (buttonRef.current) {
-     window.google.accounts.id.renderButton(buttonRef.current, {
-  theme: 'outline',
-  size: 'large',
-  text: 'continue_with',
-  width: 400, // Change from '100%' to a number
-  type: 'standard'
-});
+          window.google.accounts.id.renderButton(buttonRef.current, {
+            theme: 'outline',
+            size: 'large',
+            text: 'continue_with',
+            width: 400,
+            type: 'standard'
+          });
 
-          // Optional: Also show the One Tap prompt
-          window.google.accounts.id.prompt();
+          // Don't show the One Tap prompt to avoid conflicts
+          // window.google.accounts.id.prompt();
         }
       } catch (error) {
         console.error('Error initializing Google Auth:', error);
@@ -75,7 +76,7 @@ const GoogleLoginButton = ({ onSuccess, onError }) => {
 
   return (
     <div className="w-full">
-      <div ref={buttonRef} className="w-full"></div>
+      <div ref={buttonRef} className="w-full flex justify-center"></div>
     </div>
   );
 };

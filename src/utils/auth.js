@@ -1,4 +1,43 @@
+// src/utils/auth.js
 import { jwtDecode } from 'jwt-decode'
+
+// Shared storage key - same across all browsers
+const SHARED_STORAGE_KEY = 'trading_app_shared_data'
+
+// Helper functions for shared storage
+const getSharedData = () => {
+  try {
+    return JSON.parse(localStorage.getItem(SHARED_STORAGE_KEY) || '{}')
+  } catch (error) {
+    return {}
+  }
+}
+
+const saveSharedData = (data) => {
+  localStorage.setItem(SHARED_STORAGE_KEY, JSON.stringify(data))
+}
+
+const getSharedUsers = () => {
+  const data = getSharedData()
+  return data.users || []
+}
+
+const saveSharedUsers = (users) => {
+  const data = getSharedData()
+  data.users = users
+  saveSharedData(data)
+}
+
+const getSharedVerificationCodes = () => {
+  const data = getSharedData()
+  return data.verificationCodes || {}
+}
+
+const saveSharedVerificationCodes = (codes) => {
+  const data = getSharedData()
+  data.verificationCodes = codes
+  saveSharedData(data)
+}
 
 export const auth = {
   // Handle Google OAuth response
@@ -26,7 +65,7 @@ export const auth = {
   // Process Google user data
   processGoogleUser: async (googleData) => {
     try {
-      const users = JSON.parse(localStorage.getItem('tradingUsers') || '[]')
+      const users = getSharedUsers()
 
       // Find existing user by email or Google ID
       let user = users.find(
@@ -39,14 +78,14 @@ export const auth = {
           id: Date.now().toString(),
           name: googleData.name,
           email: googleData.email,
-          isVerified: true, // Google users are automatically verified
+          isVerified: true,
           googleId: googleData.sub,
           avatar: googleData.picture,
           createdAt: new Date().toISOString(),
           authProvider: 'google',
         }
         users.push(user)
-        localStorage.setItem('tradingUsers', JSON.stringify(users))
+        saveSharedUsers(users)
         console.log('New user created from Google:', user)
       } else {
         // Update existing user with Google data
@@ -54,7 +93,7 @@ export const auth = {
         user.avatar = googleData.picture
         user.authProvider = 'google'
         user.isVerified = true
-        localStorage.setItem('tradingUsers', JSON.stringify(users))
+        saveSharedUsers(users)
         console.log('Existing user updated with Google data:', user)
       }
 
@@ -69,27 +108,11 @@ export const auth = {
     }
   },
 
-  // Generate token
-  generateToken: (userData) => {
-    const tokenData = {
-      ...userData,
-      exp: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
-    }
-    return btoa(JSON.stringify(tokenData))
-  },
-
-  // Generate verification code
-  generateVerificationCode: () => {
-    return Math.floor(100000 + Math.random() * 900000).toString() // 6-digit code
-  },
-
   // Register new user with email verification
   register: (userData) => {
     try {
-      const users = JSON.parse(localStorage.getItem('tradingUsers') || '[]')
-      const verificationCodes = JSON.parse(
-        localStorage.getItem('verificationCodes') || '{}'
-      )
+      const users = getSharedUsers()
+      const verificationCodes = getSharedVerificationCodes()
 
       // Check if user already exists
       const existingUser = users.find((u) => u.email === userData.email)
@@ -118,17 +141,13 @@ export const auth = {
 
       // Store user and verification code
       users.push(newUser)
-      localStorage.setItem('tradingUsers', JSON.stringify(users))
-      localStorage.setItem(
-        'verificationCodes',
-        JSON.stringify(verificationCodes)
-      )
+      saveSharedUsers(users)
+      saveSharedVerificationCodes(verificationCodes)
 
-      // In a real app, you would send the code via email here
-      // For demo purposes, we'll log it to console and store it
+      // For demo purposes, log the code
       console.log(`Verification code for ${newUser.email}: ${verificationCode}`)
 
-      // Store the code in a way that the verification component can access it
+      // Store the code in session storage for current browser
       sessionStorage.setItem(
         'pendingVerification',
         JSON.stringify({
@@ -150,17 +169,14 @@ export const auth = {
   },
 
   // Verify email code
-  // Verify email code
   verifyEmail: (email, code) => {
     try {
       console.log('=== VERIFICATION DEBUG ===')
       console.log('Email:', email)
       console.log('Code entered:', code)
 
-      const verificationCodes = JSON.parse(
-        localStorage.getItem('verificationCodes') || '{}'
-      )
-      const users = JSON.parse(localStorage.getItem('tradingUsers') || '[]')
+      const verificationCodes = getSharedVerificationCodes()
+      const users = getSharedUsers()
 
       console.log('All verification codes:', verificationCodes)
       console.log('All users:', users)
@@ -179,10 +195,7 @@ export const auth = {
       if (verificationData.expiresAt < Date.now()) {
         console.log('ERROR: Code expired')
         delete verificationCodes[email]
-        localStorage.setItem(
-          'verificationCodes',
-          JSON.stringify(verificationCodes)
-        )
+        saveSharedVerificationCodes(verificationCodes)
         return { success: false, error: 'Verification code has expired' }
       }
 
@@ -205,14 +218,11 @@ export const auth = {
 
       // Mark user as verified
       users[userIndex].isVerified = true
-      localStorage.setItem('tradingUsers', JSON.stringify(users))
+      saveSharedUsers(users)
 
       // Remove used verification code
       delete verificationCodes[email]
-      localStorage.setItem(
-        'verificationCodes',
-        JSON.stringify(verificationCodes)
-      )
+      saveSharedVerificationCodes(verificationCodes)
 
       // Generate token and login
       const token = auth.generateToken(users[userIndex])
@@ -232,13 +242,54 @@ export const auth = {
     }
   },
 
+  // Login with email/password
+  login: (email, password) => {
+    try {
+      const users = getSharedUsers()
+      const user = users.find(
+        (u) => u.email === email && u.password === password
+      )
+
+      if (!user) {
+        return { success: false, error: 'Invalid email or password' }
+      }
+
+      if (!user.isVerified) {
+        return {
+          success: false,
+          error: 'Please verify your email before logging in',
+        }
+      }
+
+      const token = auth.generateToken(user)
+      localStorage.setItem('tradingToken', token)
+
+      return { success: true, user }
+    } catch (error) {
+      console.error('Login error:', error)
+      return { success: false, error: 'Login failed' }
+    }
+  },
+
+  // Generate token
+  generateToken: (userData) => {
+    const tokenData = {
+      ...userData,
+      exp: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
+    }
+    return btoa(JSON.stringify(tokenData))
+  },
+
+  // Generate verification code
+  generateVerificationCode: () => {
+    return Math.floor(100000 + Math.random() * 900000).toString() // 6-digit code
+  },
+
   // Resend verification code
   resendVerificationCode: (email) => {
     try {
-      const users = JSON.parse(localStorage.getItem('tradingUsers') || '[]')
-      const verificationCodes = JSON.parse(
-        localStorage.getItem('verificationCodes') || '{}'
-      )
+      const users = getSharedUsers()
+      const verificationCodes = getSharedVerificationCodes()
 
       const user = users.find((u) => u.email === email && !u.isVerified)
       if (!user) {
@@ -253,10 +304,7 @@ export const auth = {
         expiresAt: Date.now() + 30 * 60 * 1000, // 30 minutes
       }
 
-      localStorage.setItem(
-        'verificationCodes',
-        JSON.stringify(verificationCodes)
-      )
+      saveSharedVerificationCodes(verificationCodes)
 
       // In a real app, send email here
       console.log(`New verification code for ${email}: ${verificationCode}`)
@@ -300,35 +348,6 @@ export const auth = {
       console.error('Error getting current user:', error)
       localStorage.removeItem('tradingToken')
       return null
-    }
-  },
-
-  // Login with email/password
-  login: (email, password) => {
-    try {
-      const users = JSON.parse(localStorage.getItem('tradingUsers') || '[]')
-      const user = users.find(
-        (u) => u.email === email && u.password === password
-      )
-
-      if (!user) {
-        return { success: false, error: 'Invalid email or password' }
-      }
-
-      if (!user.isVerified) {
-        return {
-          success: false,
-          error: 'Please verify your email before logging in',
-        }
-      }
-
-      const token = auth.generateToken(user)
-      localStorage.setItem('tradingToken', token)
-
-      return { success: true, user }
-    } catch (error) {
-      console.error('Login error:', error)
-      return { success: false, error: 'Login failed' }
     }
   },
 
