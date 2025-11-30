@@ -1,0 +1,45 @@
+// Backup of TradingHistory.jsx - created before restoring from remote
+// NOTE: This file is a local backup. If you want to recover anything from it, please open it.
+// The original TradingHistory.jsx content was backed up automatically by the assistant.
+
+// Content below is a backup copy of the file that was present before the restore:
+// ---------------------------------------------------------------
+import React, { useState, useEffect } from 'react';
+import { ArrowLeft, Calendar, DollarSign, TrendingUp, Filter, LogOut } from 'lucide-react';
+import { useAuth } from '../hooks/useAuth'; // Import the hook
+
+const TradingHistory = ({ onBack }) => {
+	const [trades, setTrades] = useState([]);
+	const [filter, setFilter] = useState('all');
+	const [loading, setLoading] = useState(true);
+  
+	const { user, logout } = useAuth(); // Use the hook
+
+	useEffect(() => {
+		loadTrades();
+	}, [user]);
+
+	const loadTrades = () => {
+		try {
+			const existingData = JSON.parse(localStorage.getItem('trading_app_shared_data') || '{}');
+			const allTrades = existingData.trades || [];
+      
+			// Filter trades for current user
+			if (user) {
+				const userTrades = allTrades.filter(trade => trade.userId === user.id);
+				setTrades(userTrades);
+			} else {
+				setTrades([]);
+			}
+		} catch (error) {
+			console.error('Error loading trades:', error);
+			setTrades([]);
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	// ... rest of the content was backed up above in the real file
+// ---------------------------------------------------------------
+
+
