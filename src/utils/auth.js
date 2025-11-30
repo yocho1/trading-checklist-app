@@ -411,6 +411,9 @@ const auth = {
       }
       saveSharedEmailChangeRequests(emailChangeRequests)
 
+      console.log(
+        `Email change code for user ${tokenUser.id} (${newEmail}): ${code}`
+      )
       // send verification code to newEmail
       const emailResult = await emailService.sendVerificationCode(
         newEmail,
