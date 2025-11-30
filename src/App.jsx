@@ -177,9 +177,6 @@ if (currentView === 'history') {
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="bg-slate-700 p-2 rounded-lg">
-                <User className="text-slate-300" size={16} />
-              </div>
               <button
                 onClick={() => setCurrentView('account')}
                 className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-300 px-3 py-1 rounded-lg transition-colors text-sm mr-2"
