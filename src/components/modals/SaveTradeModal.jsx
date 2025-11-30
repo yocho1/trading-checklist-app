@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { X, Upload } from 'lucide-react';
 import CurrencyPairSelector from './CurrencyPairSelector';
 import { useTradeCalculations } from '../../hooks/useTradeCalculations';
-import { auth } from '../../utils/auth'; // Add this import
+import auth from '../../utils/auth'; // Add this import
 
 const SaveTradeModal = ({ isOpen, onClose, confluenceScore }) => {
   const [formData, setFormData] = useState({

@@ -1,7 +1,7 @@
 // src/pages/TradingHistory.jsx
 import React, { useState, useEffect } from 'react';
 import { Filter, Search, Edit, Trash2, Eye, ArrowLeft } from 'lucide-react';
-import { auth } from '../utils/auth'; // Add this import
+import auth from '../utils/auth'; // Add this import
 
 const TradingHistory = () => {
   const [trades, setTrades] = useState([]);
