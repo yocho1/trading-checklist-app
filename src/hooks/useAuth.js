@@ -102,8 +102,52 @@ export const useAuth = () => {
       setLoading(true)
       const result = await auth.updateProfile(name, email)
       if (result.success) {
+        // If a user object is returned, update local state
+        if (result.user) setUser(result.user)
+        // If email change was requested, do not update user email until confirmation
+        if (result.emailSent || result.verificationCode) {
+          console.log('Email change requested for:', email)
+        }
+      }
+      return result
+    } catch (error) {
+      throw error
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const requestEmailChange = async (newEmail) => {
+    try {
+      setLoading(true)
+      const result = await auth.requestEmailChange(newEmail)
+      return result
+    } catch (error) {
+      throw error
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const confirmEmailChange = async (code) => {
+    try {
+      setLoading(true)
+      const result = await auth.confirmEmailChange(code)
+      if (result.success && result.user) {
         setUser(result.user)
       }
+      return result
+    } catch (error) {
+      throw error
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const resendEmailChangeCode = async () => {
+    try {
+      setLoading(true)
+      const result = await auth.resendEmailChangeCode()
       return result
     } catch (error) {
       throw error
@@ -153,6 +197,9 @@ export const useAuth = () => {
     updateProfile,
     updatePassword,
     googleLogin,
+    requestEmailChange,
+    confirmEmailChange,
+    resendEmailChangeCode,
     logout,
     loading,
   }
