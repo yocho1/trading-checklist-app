@@ -7,12 +7,14 @@ import { ScoreCard } from './components/layout/ScoreCard';
 import { ChecklistSection } from './components/checklist/ChecklistSection';
 import SaveTradeModal from './components/modals/SaveTradeModal';
 import TradingHistory from './pages/TradingHistory';
+import Account from './pages/Account';
 import Login from './components/auth/Login';
 import Register from './components/auth/Register';
 
 // Hooks
 import { useScoreCalculator } from './hooks/useScoreCalculator';
 import { useAuth } from './hooks/useAuth';
+
 
 // Data
 import { CHECKLIST_DATA } from './data/checklistData';
@@ -128,10 +130,12 @@ const TradingChecklistApp = () => {
   console.log('User authenticated, showing main app. User:', user);
 
   // Rest of your component for logged-in users...
-  if (currentView === 'history') {
-    return <TradingHistory />;
+if (currentView === 'history') {
+  return <TradingHistory onBack={() => setCurrentView('checklist')} />;
+}
+  if (currentView === 'account') {
+    return <Account onBack={() => setCurrentView('checklist')} />;
   }
-
   return (
     <div className='min-h-screen bg-slate-900 text-slate-200'>
       {/* Your existing main app JSX */}
@@ -176,6 +180,13 @@ const TradingChecklistApp = () => {
               <div className="bg-slate-700 p-2 rounded-lg">
                 <User className="text-slate-300" size={16} />
               </div>
+              <button
+                onClick={() => setCurrentView('account')}
+                className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-300 px-3 py-1 rounded-lg transition-colors text-sm mr-2"
+              >
+                <User size={14} />
+                Account
+              </button>
               <button
                 onClick={logout}
                 className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-300 px-3 py-1 rounded-lg transition-colors text-sm"

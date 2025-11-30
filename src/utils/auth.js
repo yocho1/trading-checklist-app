@@ -1,5 +1,6 @@
 // src/utils/auth.js
 import { jwtDecode } from 'jwt-decode'
+import { emailService } from './emailService'
 
 // Shared storage key - same across all browsers
 const SHARED_STORAGE_KEY = 'trading_app_shared_data'
@@ -39,7 +40,121 @@ const saveSharedVerificationCodes = (codes) => {
   saveSharedData(data)
 }
 
-export const auth = {
+// Generate verification code helper
+const generateVerificationCode = () => {
+  return Math.floor(100000 + Math.random() * 900000).toString() // 6-digit code
+}
+
+// Generate token helper
+const generateToken = (userData) => {
+  const tokenData = {
+    ...userData,
+    exp: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
+  }
+  return btoa(JSON.stringify(tokenData))
+}
+
+// Create auth object
+const auth = {
+  // Initialize email service
+  init: () => {
+    emailService.init()
+  },
+
+  // Register new user with email verification - ADD THIS FUNCTION
+  register: async (name, email, password) => {
+    try {
+      console.log('auth.register: Starting registration for:', email)
+      const users = getSharedUsers()
+
+      // Check if user already exists
+      const existingUser = users.find((u) => u.email === email)
+      if (existingUser) {
+        console.log('auth.register: User already exists')
+        return { success: false, error: 'User with this email already exists' }
+      }
+
+      // Create new user
+      const newUser = {
+        id: Date.now().toString(),
+        name,
+        email,
+        password, // In a real app, this should be hashed
+        isVerified: false,
+        createdAt: new Date().toISOString(),
+        authProvider: 'email',
+      }
+
+      users.push(newUser)
+      saveSharedUsers(users)
+      console.log('auth.register: User created:', newUser.id)
+
+      // Generate verification code
+      const verificationCode = generateVerificationCode()
+      const verificationCodes = getSharedVerificationCodes()
+
+      verificationCodes[email] = {
+        code: verificationCode,
+        userId: newUser.id,
+        expiresAt: Date.now() + 30 * 60 * 1000, // 30 minutes
+      }
+
+      saveSharedVerificationCodes(verificationCodes)
+
+      // Send verification email
+      console.log(`Verification code for ${email}: ${verificationCode}`)
+
+      const expiresAt = Date.now() + 30 * 60 * 1000 // 30 minutes
+      const emailResult = await emailService.sendVerificationCode(
+        email,
+        verificationCode,
+        name,
+        expiresAt
+      )
+
+      if (!emailResult.success) {
+        // If email fails, show code on screen as fallback
+        sessionStorage.setItem(
+          'pendingVerification',
+          JSON.stringify({
+            email: email,
+            code: verificationCode,
+            emailFailed: true,
+          })
+        )
+
+        return {
+          success: true,
+          message: 'Registration successful. Please verify your email.',
+          verificationCode: verificationCode, // Show on screen
+          emailSent: false,
+          emailError: emailResult.error,
+          user: newUser,
+        }
+      }
+
+      // Store pending verification for email verification component
+      sessionStorage.setItem(
+        'pendingVerification',
+        JSON.stringify({
+          email: email,
+          code: verificationCode,
+        })
+      )
+
+      return {
+        success: true,
+        message:
+          'Registration successful. Please check your email for verification code.',
+        emailSent: true,
+        user: newUser,
+      }
+    } catch (error) {
+      console.error('Registration error:', error)
+      return { success: false, error: 'Registration failed' }
+    }
+  },
+
   // Handle Google OAuth response
   handleGoogleResponse: async (response) => {
     try {
@@ -98,7 +213,7 @@ export const auth = {
       }
 
       // Generate app token and login
-      const token = auth.generateToken(user)
+      const token = generateToken(user)
       localStorage.setItem('tradingToken', token)
 
       return { success: true, user }
@@ -108,84 +223,15 @@ export const auth = {
     }
   },
 
-  // Register new user with email verification
-  register: (userData) => {
-    try {
-      const users = getSharedUsers()
-      const verificationCodes = getSharedVerificationCodes()
-
-      // Check if user already exists
-      const existingUser = users.find((u) => u.email === userData.email)
-      if (existingUser) {
-        return { success: false, error: 'User already exists with this email' }
-      }
-
-      // Create new user (not verified yet)
-      const newUser = {
-        id: Date.now().toString(),
-        name: userData.name,
-        email: userData.email,
-        password: userData.password,
-        isVerified: false,
-        createdAt: new Date().toISOString(),
-        authProvider: 'email',
-      }
-
-      // Generate and store verification code
-      const verificationCode = auth.generateVerificationCode()
-      verificationCodes[newUser.email] = {
-        code: verificationCode,
-        userId: newUser.id,
-        expiresAt: Date.now() + 30 * 60 * 1000, // 30 minutes
-      }
-
-      // Store user and verification code
-      users.push(newUser)
-      saveSharedUsers(users)
-      saveSharedVerificationCodes(verificationCodes)
-
-      // For demo purposes, log the code
-      console.log(`Verification code for ${newUser.email}: ${verificationCode}`)
-
-      // Store the code in session storage for current browser
-      sessionStorage.setItem(
-        'pendingVerification',
-        JSON.stringify({
-          email: newUser.email,
-          code: verificationCode,
-        })
-      )
-
-      return {
-        success: true,
-        user: newUser,
-        requiresVerification: true,
-        verificationCode: verificationCode, // For demo purposes
-      }
-    } catch (error) {
-      console.error('Registration error:', error)
-      return { success: false, error: 'Registration failed' }
-    }
-  },
-
   // Verify email code
-  verifyEmail: (email, code) => {
+  verifyEmail: async (email, code) => {
     try {
-      console.log('=== VERIFICATION DEBUG ===')
-      console.log('Email:', email)
-      console.log('Code entered:', code)
-
       const verificationCodes = getSharedVerificationCodes()
       const users = getSharedUsers()
-
-      console.log('All verification codes:', verificationCodes)
-      console.log('All users:', users)
 
       const verificationData = verificationCodes[email]
-      console.log('Verification data for email:', verificationData)
 
       if (!verificationData) {
-        console.log('ERROR: No verification data found for this email')
         return {
           success: false,
           error: 'No verification request found for this email',
@@ -193,26 +239,18 @@ export const auth = {
       }
 
       if (verificationData.expiresAt < Date.now()) {
-        console.log('ERROR: Code expired')
         delete verificationCodes[email]
         saveSharedVerificationCodes(verificationCodes)
         return { success: false, error: 'Verification code has expired' }
       }
 
-      console.log('Expected code:', verificationData.code)
-      console.log('Entered code:', code)
-
       if (verificationData.code !== code) {
-        console.log('ERROR: Code mismatch')
         return { success: false, error: 'Invalid verification code' }
       }
 
       // Find and update user
       const userIndex = users.findIndex((u) => u.id === verificationData.userId)
-      console.log('User index:', userIndex)
-
       if (userIndex === -1) {
-        console.log('ERROR: User not found')
         return { success: false, error: 'User not found' }
       }
 
@@ -225,13 +263,15 @@ export const auth = {
       saveSharedVerificationCodes(verificationCodes)
 
       // Generate token and login
-      const token = auth.generateToken(users[userIndex])
+      const token = generateToken(users[userIndex])
       localStorage.setItem('tradingToken', token)
+
+      // Send welcome email
+      emailService.sendWelcomeEmail(email, users[userIndex].name)
 
       // Clear pending verification
       sessionStorage.removeItem('pendingVerification')
 
-      console.log('SUCCESS: User verified successfully')
       return {
         success: true,
         user: users[userIndex],
@@ -261,7 +301,7 @@ export const auth = {
         }
       }
 
-      const token = auth.generateToken(user)
+      const token = generateToken(user)
       localStorage.setItem('tradingToken', token)
 
       return { success: true, user }
@@ -271,22 +311,8 @@ export const auth = {
     }
   },
 
-  // Generate token
-  generateToken: (userData) => {
-    const tokenData = {
-      ...userData,
-      exp: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
-    }
-    return btoa(JSON.stringify(tokenData))
-  },
-
-  // Generate verification code
-  generateVerificationCode: () => {
-    return Math.floor(100000 + Math.random() * 900000).toString() // 6-digit code
-  },
-
   // Resend verification code
-  resendVerificationCode: (email) => {
+  resendVerificationCode: async (email) => {
     try {
       const users = getSharedUsers()
       const verificationCodes = getSharedVerificationCodes()
@@ -297,7 +323,7 @@ export const auth = {
       }
 
       // Generate new verification code
-      const verificationCode = auth.generateVerificationCode()
+      const verificationCode = generateVerificationCode()
       verificationCodes[email] = {
         code: verificationCode,
         userId: user.id,
@@ -306,22 +332,43 @@ export const auth = {
 
       saveSharedVerificationCodes(verificationCodes)
 
-      // In a real app, send email here
-      console.log(`New verification code for ${email}: ${verificationCode}`)
-
-      // Update session storage
-      sessionStorage.setItem(
-        'pendingVerification',
-        JSON.stringify({
-          email: email,
-          code: verificationCode,
-        })
+      // Send verification email
+      console.log(
+        `Resending verification code to ${email}: ${verificationCode}`
       )
+
+      const expiresAt = Date.now() + 30 * 60 * 1000 // 30 minutes
+      const emailResult = await emailService.sendVerificationCode(
+        email,
+        verificationCode,
+        user.name,
+        expiresAt
+      )
+
+      if (!emailResult.success) {
+        // If email fails, show code on screen as fallback
+        sessionStorage.setItem(
+          'pendingVerification',
+          JSON.stringify({
+            email: email,
+            code: verificationCode,
+            emailFailed: true,
+          })
+        )
+
+        return {
+          success: true,
+          message: 'Verification code generated',
+          verificationCode: verificationCode, // Show on screen
+          emailSent: false,
+          emailError: emailResult.error,
+        }
+      }
 
       return {
         success: true,
-        message: 'Verification code sent successfully',
-        verificationCode: verificationCode, // For demo purposes
+        message: 'Verification code sent to your email',
+        emailSent: true,
       }
     } catch (error) {
       console.error('Resend verification error:', error)
@@ -365,4 +412,59 @@ export const auth = {
       return false
     }
   },
+}
+
+export default auth
+
+// Update profile (name, email)
+auth.updateProfile = async (name, email) => {
+  try {
+    const users = getSharedUsers()
+    const tokenUser = auth.getCurrentUser()
+    if (!tokenUser) return { success: false, error: 'Not authenticated' }
+
+    const userIndex = users.findIndex((u) => u.id === tokenUser.id)
+    if (userIndex === -1) return { success: false, error: 'User not found' }
+
+    // Check if email is used by someone else
+    const existing = users.find(
+      (u) => u.email === email && u.id !== tokenUser.id
+    )
+    if (existing) return { success: false, error: 'Email already in use' }
+
+    users[userIndex].name = name
+    users[userIndex].email = email
+    saveSharedUsers(users)
+
+    // Update token with new data
+    const updatedToken = generateToken(users[userIndex])
+    localStorage.setItem('tradingToken', updatedToken)
+    return { success: true, user: users[userIndex] }
+  } catch (error) {
+    console.error('Error updating profile', error)
+    return { success: false, error: 'Failed to update profile' }
+  }
+}
+
+// Update password
+auth.updatePassword = async (currentPassword, newPassword) => {
+  try {
+    const users = getSharedUsers()
+    const tokenUser = auth.getCurrentUser()
+    if (!tokenUser) return { success: false, error: 'Not authenticated' }
+
+    const userIndex = users.findIndex((u) => u.id === tokenUser.id)
+    if (userIndex === -1) return { success: false, error: 'User not found' }
+
+    if (users[userIndex].password !== currentPassword) {
+      return { success: false, error: 'Current password is incorrect' }
+    }
+
+    users[userIndex].password = newPassword
+    saveSharedUsers(users)
+    return { success: true, message: 'Password updated' }
+  } catch (error) {
+    console.error('Error updating password', error)
+    return { success: false, error: 'Failed to update password' }
+  }
 }
