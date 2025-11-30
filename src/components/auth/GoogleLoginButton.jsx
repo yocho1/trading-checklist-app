@@ -26,13 +26,27 @@ const GoogleLoginButton = ({ onSuccess, onError }) => {
     const initializeGoogle = () => {
       try {
         const clientId = process.env.REACT_APP_GOOGLE_CLIENT_ID;
-        
+        const appDomain = process.env.REACT_APP_APP_DOMAIN || window.location.origin;
         console.log('Google Client ID:', clientId);
+        console.log('Expected app domain (REACT_APP_APP_DOMAIN):', appDomain);
+        console.log('Current window origin:', window.location.origin);
         
         if (!clientId) {
           console.error('Google Client ID not found. Please set REACT_APP_GOOGLE_CLIENT_ID in your .env file');
           onError?.('Google authentication configuration missing');
           return;
+        }
+
+        // Check for app domain mismatch which frequently causes GSI origin 403.
+        if (appDomain && window.location.origin && appDomain !== window.location.origin) {
+          console.warn(
+            'Google origin mismatch: REACT_APP_APP_DOMAIN does not match window.location.origin. This often causes "origin not allowed" errors in GSI. Expected:',
+            appDomain,
+            'Actual:',
+            window.location.origin
+          )
+          // Provide a non-blocking error to the consumer
+          onError?.('Google Identity origin mismatch. Check OAuth Authorized origins in your Google Cloud Console.');
         }
 
         window.google.accounts.id.initialize({

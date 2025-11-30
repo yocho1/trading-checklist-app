@@ -1,5 +1,6 @@
+// src/components/auth/EmailVerification.jsx
 import React, { useState, useEffect } from 'react';
-import { Mail, ArrowLeft, RotateCcw, CheckCircle, AlertCircle } from 'lucide-react';
+import { Mail, ArrowLeft, RotateCcw, CheckCircle, AlertCircle, Send, Copy } from 'lucide-react';
 
 const EmailVerification = ({ email, onVerify, onBack, onResendCode }) => {
   const [code, setCode] = useState(['', '', '', '', '', '']);
@@ -10,13 +11,17 @@ const EmailVerification = ({ email, onVerify, onBack, onResendCode }) => {
   const [timeLeft, setTimeLeft] = useState(30);
   const [verificationCode, setVerificationCode] = useState('');
   const [isVerified, setIsVerified] = useState(false);
+  const [emailFailed, setEmailFailed] = useState(false);
 
-  // Get the verification code from sessionStorage for demo purposes
+  // Get the verification code from sessionStorage
   useEffect(() => {
     const pendingVerification = sessionStorage.getItem('pendingVerification');
+    console.log('EmailVerification: pendingVerification from sessionStorage:', pendingVerification);
     if (pendingVerification) {
       const data = JSON.parse(pendingVerification);
       setVerificationCode(data.code);
+      setEmailFailed(data.emailFailed || false);
+      console.log('EmailVerification: Loaded verification code:', data.code, 'emailFailed:', data.emailFailed);
     }
   }, []);
 
@@ -62,20 +67,28 @@ const EmailVerification = ({ email, onVerify, onBack, onResendCode }) => {
       return;
     }
 
-    const result = await onVerify(email, verificationCode);
+    console.log('EmailVerification: Submitting code:', verificationCode);
     
-    if (result.success) {
-      setSuccess('Email verified successfully! Redirecting...');
-      setIsVerified(true);
-      // Redirect after successful verification
-      setTimeout(() => {
-        window.location.reload(); // This will reload the app and show the main dashboard
-      }, 2000);
-    } else {
-      setError(result.error);
+    try {
+      const result = await onVerify(email, verificationCode);
+      console.log('EmailVerification: Verification result:', result);
+      
+      if (result.success) {
+        setSuccess('Email verified successfully! Redirecting...');
+        setIsVerified(true);
+        // Redirect after successful verification
+        setTimeout(() => {
+          window.location.reload();
+        }, 2000);
+      } else {
+        setError(result.error || 'Verification failed');
+      }
+    } catch (error) {
+      console.error('EmailVerification: Error during verification:', error);
+      setError('An error occurred during verification');
+    } finally {
+      setLoading(false);
     }
-    
-    setLoading(false);
   };
 
   const handleResendCode = async () => {
@@ -83,18 +96,59 @@ const EmailVerification = ({ email, onVerify, onBack, onResendCode }) => {
     setError('');
     setSuccess('');
 
-    const result = await onResendCode(email);
+    console.log('EmailVerification: Resending code to:', email);
     
-    if (result.success) {
-      setSuccess('Verification code sent successfully!');
-      setTimeLeft(30); // Reset cooldown
-      setVerificationCode(result.verificationCode); // For demo
-    } else {
-      setError(result.error);
+    try {
+      const result = await onResendCode(email);
+      console.log('EmailVerification: Resend result:', result);
+      
+      if (result.success) {
+        if (result.verificationCode) {
+          // Email failed, show code on screen
+          setVerificationCode(result.verificationCode);
+          setEmailFailed(true);
+          setSuccess('Email service unavailable. Use the code below: (copy it to paste into the field)');
+        } else {
+          // Email sent successfully
+          setEmailFailed(false);
+          setSuccess('Verification code sent to your email!');
+        }
+        setTimeLeft(30);
+      } else {
+        setError(result.error || 'Failed to resend code');
+      }
+    } catch (error) {
+      console.error('EmailVerification: Error resending code:', error);
+      setError('Failed to resend verification code');
+    } finally {
+      setResendLoading(false);
     }
-    
-    setResendLoading(false);
   };
+
+  const handlePasteAndVerify = async () => {
+    if (!verificationCode) return;
+    // Fill UI input fields with code
+    const digits = verificationCode.split('')
+    setCode(digits)
+    // Try verification using onVerify
+    setLoading(true)
+    setError('')
+    try {
+      const result = await onVerify(email, verificationCode)
+      if (result.success) {
+        setSuccess('Email verified successfully! Redirecting...')
+        setIsVerified(true)
+        setTimeout(() => window.location.reload(), 2000)
+      } else {
+        setError(result.error || 'Verification failed')
+      }
+    } catch (err) {
+      console.error('EmailVerification: Paste and verify failed', err)
+      setError('Verification failed')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   // If already verified, show success message
   if (isVerified) {
@@ -121,6 +175,17 @@ const EmailVerification = ({ email, onVerify, onBack, onResendCode }) => {
     );
   }
 
+  const handleCopyCode = async () => {
+    if (!verificationCode) return;
+    try {
+      await navigator.clipboard.writeText(verificationCode);
+      setSuccess('Code copied to clipboard');
+    } catch (error) {
+      console.error('EmailVerification: Failed to copy code', error);
+      setError('Could not copy code. Please highlight and copy manually.');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
       <div className="bg-slate-800 rounded-xl border border-slate-700 p-8 w-full max-w-md">
@@ -139,12 +204,65 @@ const EmailVerification = ({ email, onVerify, onBack, onResendCode }) => {
             Enter the 6-digit code below to complete your registration
           </p>
 
-          {/* Demo Only - Show verification code */}
-          {verificationCode && (
+          {/* Email Status */}
+          {emailFailed ? (
             <div className="mt-4 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
-              <p className="text-yellow-400 text-sm text-center">
-                <strong>Demo Only:</strong> Verification code: {verificationCode}
+              <div className="flex items-center gap-2 justify-center mb-2">
+                <Send className="text-yellow-400" size={16} />
+                <p className="text-yellow-400 text-sm font-medium">Email Service Unavailable</p>
+              </div>
+              <div className="text-sm text-center">
+                <p className="text-yellow-400">Use this verification code shown below:</p>
+                <div className="flex items-center justify-center gap-2 mt-2">
+                  <strong className="bg-slate-700 text-white px-4 py-2 rounded-md">{verificationCode}</strong>
+                  <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="text-yellow-300 hover:text-white ml-2 px-3 py-2 rounded-md border border-yellow-300"
+                    onClick={handleCopyCode}
+                  >
+                    <Copy size={14} />
+                    <span className="ml-2">Copy</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="text-yellow-300 hover:text-white ml-2 px-3 py-2 rounded-md border border-yellow-300"
+                    onClick={handlePasteAndVerify}
+                  >
+                    <span className="ml-2">Paste & Verify</span>
+                  </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : verificationCode ? (
+            <div className="mt-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+              <p className="text-blue-400 text-sm text-center">
+                <strong>Development Mode:</strong> Code: {verificationCode}
+                <div className="inline-flex items-center gap-2 ml-2">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-2 text-blue-300 hover:text-white px-2 py-1 rounded-md border border-blue-300"
+                  onClick={handleCopyCode}
+                >
+                  <Copy size={14} /> Copy
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-2 text-blue-300 hover:text-white px-2 py-1 rounded-md border border-blue-300"
+                  onClick={handlePasteAndVerify}
+                >
+                  Paste & Verify
+                </button>
+                </div>
               </p>
+            </div>
+          ) : (
+            <div className="mt-4 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+                <div className="flex items-center gap-2 justify-center">
+                <Send className="text-emerald-400" size={16} />
+                <p className="text-emerald-400 text-sm">Verification code sent to your email</p>
+              </div>
             </div>
           )}
         </div>

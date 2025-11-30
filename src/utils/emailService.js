@@ -15,8 +15,18 @@ export const emailService = {
   },
 
   // Send verification code email
-  sendVerificationCode: async (email, verificationCode, userName) => {
+  sendVerificationCode: async (
+    email,
+    verificationCode,
+    userName,
+    expiresAt,
+    meta = {}
+  ) => {
     try {
+      const readableExpiresAt = expiresAt
+        ? new Date(expiresAt).toLocaleString()
+        : null
+
       const serviceId = process.env.REACT_APP_EMAILJS_SERVICE_ID
       const templateId = process.env.REACT_APP_EMAILJS_TEMPLATE_ID
 
@@ -34,6 +44,8 @@ export const emailService = {
         user_name: userName,
         verification_code: verificationCode,
         code: verificationCode,
+        passcode: verificationCode,
+        passCode: verificationCode,
         verificationCode: verificationCode,
         // Additional aliases to cover many template variable names
         otp: verificationCode,
@@ -41,9 +53,15 @@ export const emailService = {
         oneTimePassword: verificationCode,
         // A plain text message field to make sure the code appears if template uses `message` or `body`
         message: `Your verification code is ${verificationCode}`,
+        message_html: `<p>Your verification code is <strong>${verificationCode}</strong></p>`,
+        // Human readable expiry
+        expiresAt: readableExpiresAt,
+        time: readableExpiresAt,
         app_name: 'Trading Checklist App',
         from_name: 'Trading Checklist Team',
         reply_to: 'no-reply@tradingchecklist.com',
+        // Include any additional meta fields (e.g., newEmail, action) supplied by caller
+        ...meta,
       }
 
       console.debug('EmailJS template params (full):', templateParams)
@@ -86,7 +104,7 @@ export const emailService = {
   },
 
   // Send a basic test email to help debug EmailJS setup in dev
-  sendTestEmail: async (email, userName = 'Dev Test') => {
+  sendTestEmail: async (email, userName = 'Dev Test', testCode = null) => {
     try {
       const serviceId = process.env.REACT_APP_EMAILJS_SERVICE_ID
       const templateId = process.env.REACT_APP_EMAILJS_TEMPLATE_ID
@@ -103,6 +121,14 @@ export const emailService = {
         app_name: 'Trading Checklist App',
         from_name: 'Trading Checklist Team',
         message: `Test email from Trading Checklist App`,
+        code: testCode,
+        verification_code: testCode,
+        message_html: testCode
+          ? `<p>Your test code is <strong>${testCode}</strong></p>`
+          : 'Test email from Trading Checklist App',
+        passcode: testCode,
+        passCode: testCode,
+        time: new Date().toLocaleString(),
       }
 
       console.log(

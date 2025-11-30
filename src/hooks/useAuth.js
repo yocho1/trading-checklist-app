@@ -156,6 +156,18 @@ export const useAuth = () => {
     }
   }
 
+  const cancelEmailChangeRequest = async () => {
+    try {
+      setLoading(true)
+      const result = await auth.cancelEmailChangeRequest()
+      return result
+    } catch (error) {
+      throw error
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const updatePassword = async (currentPassword, newPassword) => {
     try {
       setLoading(true)
@@ -200,6 +212,7 @@ export const useAuth = () => {
     requestEmailChange,
     confirmEmailChange,
     resendEmailChangeCode,
+    cancelEmailChangeRequest,
     logout,
     loading,
   }

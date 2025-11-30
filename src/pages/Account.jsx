@@ -4,7 +4,7 @@ import { User, Mail, Lock, Check } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 
 const Account = ({ onBack }) => {
-  const { user, logout, updateProfile, requestEmailChange, confirmEmailChange, resendEmailChangeCode, updatePassword } = useAuth()
+  const { user, logout, updateProfile, requestEmailChange, confirmEmailChange, resendEmailChangeCode, cancelEmailChangeRequest, updatePassword } = useAuth()
   const [formData, setFormData] = useState({ name: '', email: '' })
   const [pwData, setPwData] = useState({ current: '', password: '', confirm: '' })
   const [loading, setLoading] = useState(false)
@@ -35,7 +35,7 @@ const Account = ({ onBack }) => {
         if (result.user) {
           setSuccess('Profile updated')
         } else if (result.emailSent || result.verificationCode) {
-          setSuccess('Verification code sent to new email')
+          setSuccess('Verification code sent to your current email to confirm ownership')
           setPendingEmailChange({ userId: user.id, newEmail: formData.email, emailFailed: !result.emailSent, verificationCode: result.verificationCode })
         } else {
           setSuccess('Profile update initiated')
@@ -170,16 +170,33 @@ const Account = ({ onBack }) => {
         {/* Pending email change */}
         {pendingEmailChange && (
           <form onSubmit={handleConfirmEmailChange} className="bg-slate-800 rounded-xl border border-slate-700 p-6 mb-6">
-            <h3 className="text-lg font-bold text-white mb-4">Confirm new email</h3>
-            <div className="text-slate-400 mb-2">A verification code was sent to <strong>{pendingEmailChange.newEmail}</strong>. Enter it below to confirm ownership of that email.</div>
+            <h3 className="text-lg font-bold text-white mb-4">Confirm email change</h3>
+            <div className="text-slate-400 mb-2">A verification code was sent to your current email <strong>{user.email}</strong> to verify account ownership. Once confirmed, your account will be updated to <strong>{pendingEmailChange.newEmail}</strong>.</div>
             {pendingEmailChange.emailFailed && pendingEmailChange.verificationCode && (
-              <div className="bg-yellow-500/10 border border-yellow-500/20 p-3 rounded mb-4 text-yellow-400">Dev Only: Fallback code: {pendingEmailChange.verificationCode}</div>
+              <div className="bg-yellow-500/10 border border-yellow-500/20 p-3 rounded mb-4 text-yellow-400">Dev Only: Fallback code (sent to {user.email}): {pendingEmailChange.verificationCode}</div>
             )}
             <label className="block text-slate-400 text-sm mb-1">Verification Code</label>
             <input value={emailCode} onChange={(e) => setEmailCode(e.target.value)} className="w-full mb-4 bg-slate-700 border border-slate-600 p-3 rounded text-white" />
             <div className="flex gap-2">
               <button type="submit" className="bg-emerald-600 px-4 py-2 rounded">Confirm Email</button>
               <button type="button" onClick={handleResendEmailChange} className="bg-slate-700 px-4 py-2 rounded">Resend Code</button>
+              <button type="button" onClick={async () => {
+                setLoading(true)
+                setError('')
+                setSuccess('')
+                try {
+                  const res = await cancelEmailChangeRequest()
+                  if (res.success) {
+                    setPendingEmailChange(null)
+                  } else {
+                    setError(res.error || 'Failed to cancel')
+                  }
+                } catch (err) {
+                  setError('Failed to cancel request')
+                } finally {
+                  setLoading(false)
+                }
+              }} className="bg-red-600 px-4 py-2 rounded">Cancel</button>
             </div>
           </form>
         )}

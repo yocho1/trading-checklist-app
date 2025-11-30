@@ -412,14 +412,15 @@ const auth = {
       saveSharedEmailChangeRequests(emailChangeRequests)
 
       console.log(
-        `Email change code for user ${tokenUser.id} (${newEmail}): ${code}`
+        `Email change code for user ${tokenUser.id} (oldEmail:${tokenUser.email}) newEmail:${newEmail} code:${code}`
       )
-      // send verification code to newEmail
+      // send verification code to the user's current (old) email to verify identity
       const emailResult = await emailService.sendVerificationCode(
-        newEmail,
+        tokenUser.email,
         code,
         tokenUser.name,
-        expiresAt
+        expiresAt,
+        { newEmail, new_email: newEmail }
       )
 
       if (!emailResult.success) {
@@ -446,7 +447,8 @@ const auth = {
       )
       return {
         success: true,
-        message: 'Verification code sent to new email',
+        message:
+          'Verification code sent to your current email to confirm ownership',
         emailSent: true,
       }
     } catch (error) {
@@ -522,10 +524,11 @@ const auth = {
       }
       saveSharedEmailChangeRequests(emailChangeRequests)
       const emailResult = await emailService.sendVerificationCode(
-        request.newEmail,
+        tokenUser.email,
         code,
         tokenUser.name,
-        expiresAt
+        expiresAt,
+        { newEmail: request.newEmail, new_email: request.newEmail }
       )
       if (!emailResult.success) {
         sessionStorage.setItem(
@@ -553,6 +556,24 @@ const auth = {
     } catch (error) {
       console.error('resendEmailChangeCode error:', error)
       return { success: false, error: 'Failed to resend verification email' }
+    }
+  },
+
+  // Cancel pending email change request
+  cancelEmailChangeRequest: async () => {
+    try {
+      const tokenUser = auth.getCurrentUser()
+      if (!tokenUser) return { success: false, error: 'Not authenticated' }
+      const emailChangeRequests = getSharedEmailChangeRequests()
+      if (!emailChangeRequests[tokenUser.id])
+        return { success: false, error: 'No pending request' }
+      delete emailChangeRequests[tokenUser.id]
+      saveSharedEmailChangeRequests(emailChangeRequests)
+      sessionStorage.removeItem('pendingEmailChange')
+      return { success: true, message: 'Email change request canceled' }
+    } catch (error) {
+      console.error('cancelEmailChangeRequest error:', error)
+      return { success: false, error: 'Failed to cancel email change request' }
     }
   },
 

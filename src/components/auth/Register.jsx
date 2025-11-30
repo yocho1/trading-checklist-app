@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UserPlus, Mail, Lock, User, AlertCircle } from 'lucide-react';
 import GoogleLoginButton from './GoogleLoginButton';
+import { emailService } from '../../utils/emailService';
 import EmailVerification from './EmailVerification';
 
-// Update the component to accept onVerify and onResendCode props
 const Register = ({ onRegister, onSwitchToLogin, onGoogleLogin, onVerify, onResendCode }) => {
   const [formData, setFormData] = useState({
     name: '',
@@ -15,56 +15,163 @@ const Register = ({ onRegister, onSwitchToLogin, onGoogleLogin, onVerify, onRese
   const [loading, setLoading] = useState(false);
   const [showVerification, setShowVerification] = useState(false);
   const [pendingUser, setPendingUser] = useState(null);
+  const [success, setSuccess] = useState('');
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleGoogleResponse = async (response) => {
     setLoading(true);
     setError('');
+    
+    const result = await onGoogleLogin(response);
+    
+    if (!result.success) {
+      setError(result.error);
+    }
+    
+    setLoading(false);
+  };
 
-    // Validation
+  useEffect(() => {
+    // Initialize Google OAuth
+    if (window.google) {
+      window.google.accounts.id.initialize({
+        client_id: '673123551784-s1psrnhegc2lf6gurbg1r825i86fmvmq.apps.googleusercontent.com',
+        callback: handleGoogleResponse,
+        context: 'signin',
+        ux_mode: 'popup'
+      });
+    }
+  }, []);
+
+  // If reload occurred after registration and pending verification exists, show verification screen
+  useEffect(() => {
+    const pending = sessionStorage.getItem('pendingVerification')
+    if (pending) {
+      try {
+        const data = JSON.parse(pending)
+        setShowVerification(true)
+        setPendingUser({ email: data.email, name: formData.name || data.name || '' })
+        setSuccess('Registration pending verification. Use the code sent to your email (or displayed on-screen if email failed).')
+      } catch (err) {
+        // ignore
+      }
+    }
+  }, [])
+
+  const handleSubmit = async (e) => {
+    e.preventDefault(); // Prevent default form submission
+    console.log('Register: Form submitted');
+    
+    setLoading(true);
+    setError('');
+    setSuccess('');
+
+    // Check if passwords match
     if (formData.password !== formData.confirmPassword) {
       setError('Passwords do not match');
       setLoading(false);
       return;
     }
 
+    // Validate password length
     if (formData.password.length < 6) {
-      setError('Password must be at least 6 characters');
+      setError('Password must be at least 6 characters long');
       setLoading(false);
       return;
     }
 
-    const result = await onRegister({
-      name: formData.name,
-      email: formData.email,
-      password: formData.password
-    });
-
-    if (result.success) {
-      if (result.requiresVerification) {
-        setPendingUser(result.user);
+    try {
+      console.log('Register: Calling onRegister with:', { 
+        name: formData.name, 
+        email: formData.email 
+      });
+      
+      const result = await onRegister(formData.name, formData.email, formData.password);
+      console.log('Register: Registration result:', result);
+      
+      if (result.success) {
+        // Registration successful, show verification screen
+        console.log('Register: Showing verification screen');
         setShowVerification(true);
+        setPendingUser({ 
+          email: formData.email,
+          name: formData.name 
+        });
+        setSuccess(result.message || 'Registration successful! Please verify your email.');
+        
+        // If email failed, show the code
+        if (result.verificationCode) {
+          console.log('Verification code:', result.verificationCode);
+          // Store in sessionStorage for the verification component
+          sessionStorage.setItem('pendingVerification', JSON.stringify({
+            email: formData.email,
+            code: result.verificationCode,
+            emailFailed: true
+          }));
+        }
+      } else {
+        setError(result.error || 'Registration failed. Please try again.');
+        if (result.emailError || result.details) {
+          console.warn('Register: email error/details:', result.emailError, result.details)
+          setError(prev => prev + (result.emailError ? ' - ' + result.emailError : '') + (result.details ? ' - ' + result.details : ''))
+        }
       }
-    } else {
-      setError(result.error);
+    } catch (error) {
+      console.error('Register: Unexpected error:', error);
+      setError('An unexpected error occurred. Please try again.');
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
+
+  // Dev-only: send test email to verify EmailJS settings
+  const handleSendTestEmail = async () => {
+    if (!formData.email) {
+      setError('Enter an email to send a test')
+      return
+    }
+    setLoading(true)
+    setError('')
+    try {
+      // include a test code value to preview in the template (if template uses a `code` or `verification_code` variable)
+      const testCode = Math.floor(100000 + Math.random() * 900000).toString()
+      const result = await emailService.sendTestEmail(
+        formData.email,
+        formData.name || 'Dev Test',
+        testCode
+      )
+      if (result.success) {
+        setSuccess('Test email sent. Check your inbox or spam.')
+      } else {
+        setError(result.error || 'Failed to send test email')
+        if (result.details) {
+          console.warn('EmailJS test details:', result.details)
+          setError(prev => prev + (result.details ? ' - ' + result.details : ''))
+        }
+      }
+    } catch (err) {
+      console.error('Send test email failed', err)
+      setError('Failed to send test email')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   // Show verification component if needed
   if (showVerification && pendingUser) {
     return (
       <EmailVerification
         email={pendingUser.email}
-        onVerify={onVerify} // Use the prop passed from App.jsx
-        onBack={() => setShowVerification(false)}
-        onResendCode={onResendCode} // Use the prop passed from App.jsx
+        onVerify={onVerify}
+        onBack={() => {
+          setShowVerification(false);
+          setPendingUser(null);
+          setSuccess('');
+        }}
+        onResendCode={onResendCode}
       />
     );
   }
 
-  // Your existing registration form JSX
   return (
     <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
       <div className="bg-slate-800 rounded-xl border border-slate-700 p-8 w-full max-w-md">
@@ -87,16 +194,19 @@ const Register = ({ onRegister, onSwitchToLogin, onGoogleLogin, onVerify, onRese
           </div>
         )}
 
+        {/* Success Message */}
+        {success && !showVerification && (
+          <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-4 mb-6 flex items-center gap-3">
+            <AlertCircle className="text-emerald-400" size={20} />
+            <span className="text-emerald-400 text-sm">{success}</span>
+          </div>
+        )}
+
         {/* Google Sign In Button */}
         {onGoogleLogin && (
           <>
             <GoogleLoginButton
-              onSuccess={async (response) => {
-                const result = await onGoogleLogin(response);
-                if (!result.success) {
-                  setError(result.error);
-                }
-              }}
+              onSuccess={handleGoogleResponse}
               onError={(error) => {
                 setError(error || 'Google login failed');
               }}
@@ -149,6 +259,18 @@ const Register = ({ onRegister, onSwitchToLogin, onGoogleLogin, onVerify, onRese
                 required
               />
             </div>
+            {/* Dev-only send test email button */}
+            {process.env.REACT_APP_ENABLE_TEST_EMAIL === 'true' && (
+              <div className="mt-2 flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleSendTestEmail}
+                  className="text-sm text-emerald-400 hover:text-emerald-300"
+                >
+                  Send test email
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Password */}
@@ -214,6 +336,7 @@ const Register = ({ onRegister, onSwitchToLogin, onGoogleLogin, onVerify, onRese
           <p className="text-slate-400">
             Already have an account?{' '}
             <button
+              type="button" // Add type="button" to prevent form submission
               onClick={onSwitchToLogin}
               className="text-emerald-400 hover:text-emerald-300 font-medium transition-colors"
             >

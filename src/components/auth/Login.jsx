@@ -1,14 +1,40 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react'; // Add useEffect import
 import { LogIn, Mail, Lock, AlertCircle } from 'lucide-react';
-import GoogleLoginButton from './GoogleLoginButton'; // Add this import
+import GoogleLoginButton from './GoogleLoginButton';
 
-const Login = ({ onLogin, onSwitchToRegister, onGoogleLogin }) => { // Add onGoogleLogin prop
+const Login = ({ onLogin, onSwitchToRegister, onGoogleLogin }) => {
   const [formData, setFormData] = useState({
     email: '',
     password: ''
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Add handleGoogleResponse function
+  const handleGoogleResponse = async (response) => {
+    setLoading(true);
+    setError('');
+    
+    const result = await onGoogleLogin(response);
+    
+    if (!result.success) {
+      setError(result.error);
+    }
+    
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    // Initialize Google OAuth
+    if (window.google) {
+      window.google.accounts.id.initialize({
+        client_id: '673123551784-s1psrnhegc2lf6gurbg1r825i86fmvmq.apps.googleusercontent.com',
+        callback: handleGoogleResponse,
+        context: 'signin',
+        ux_mode: 'popup'
+      });
+    }
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -50,12 +76,7 @@ const Login = ({ onLogin, onSwitchToRegister, onGoogleLogin }) => { // Add onGoo
         {onGoogleLogin && (
           <>
             <GoogleLoginButton
-              onSuccess={async (response) => {
-                const result = await onGoogleLogin(response);
-                if (!result.success) {
-                  setError(result.error);
-                }
-              }}
+              onSuccess={handleGoogleResponse}
               onError={(error) => {
                 setError(error || 'Google login failed');
               }}
