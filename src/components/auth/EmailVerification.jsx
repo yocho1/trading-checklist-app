@@ -20,6 +20,9 @@ const EmailVerification = ({ email, onVerify, onBack, onResendCode }) => {
     if (pendingVerification) {
       const data = JSON.parse(pendingVerification);
       setVerificationCode(data.code);
+      if (data.code && data.code.length === 6) {
+        setCode(data.code.split(''));
+      }
       setEmailFailed(data.emailFailed || false);
       console.log('EmailVerification: Loaded verification code:', data.code, 'emailFailed:', data.emailFailed);
     }
@@ -59,29 +62,43 @@ const EmailVerification = ({ email, onVerify, onBack, onResendCode }) => {
     setLoading(true);
     setError('');
 
-    const verificationCode = code.join('');
+    const enteredCode = code.join('');
     
-    if (verificationCode.length !== 6) {
-      setError('Please enter the 6-digit verification code');
+    // Check if code is complete
+    if (enteredCode.length !== 6) {
+      setError('Please enter the complete 6-digit verification code');
       setLoading(false);
       return;
     }
 
-    console.log('EmailVerification: Submitting code:', verificationCode);
+    console.log('EmailVerification: Submitting code:', enteredCode, 'for email:', email);
     
     try {
-      const result = await onVerify(email, verificationCode);
+      const result = await onVerify(email, enteredCode);
       console.log('EmailVerification: Verification result:', result);
       
       if (result.success) {
         setSuccess('Email verified successfully! Redirecting...');
         setIsVerified(true);
-        // Redirect after successful verification
+        
+        // Store user in localStorage
+        if (result.user) {
+          localStorage.setItem('currentUser', JSON.stringify(result.user));
+          console.log('EmailVerification: User stored in localStorage:', result.user);
+        }
+        
+        // Redirect to dashboard after a short delay
         setTimeout(() => {
-          window.location.reload();
-        }, 2000);
+          // Use window.location.href for full page navigation
+          window.location.href = '/dashboard';
+        }, 1500);
       } else {
         setError(result.error || 'Verification failed');
+        // Clear inputs on error
+        setCode(['', '', '', '', '', '']);
+        // Focus first input
+        const firstInput = document.getElementById('code-0');
+        if (firstInput) firstInput.focus();
       }
     } catch (error) {
       console.error('EmailVerification: Error during verification:', error);
@@ -127,18 +144,31 @@ const EmailVerification = ({ email, onVerify, onBack, onResendCode }) => {
 
   const handlePasteAndVerify = async () => {
     if (!verificationCode) return;
+    
     // Fill UI input fields with code
     const digits = verificationCode.split('')
     setCode(digits)
+    
     // Try verification using onVerify
     setLoading(true)
     setError('')
+    
     try {
       const result = await onVerify(email, verificationCode)
       if (result.success) {
         setSuccess('Email verified successfully! Redirecting...')
         setIsVerified(true)
-        setTimeout(() => window.location.reload(), 2000)
+        
+        // Store user in localStorage
+        if (result.user) {
+          localStorage.setItem('currentUser', JSON.stringify(result.user));
+          console.log('EmailVerification (paste): User stored in localStorage:', result.user);
+        }
+        
+        // Redirect to dashboard
+        setTimeout(() => {
+          window.location.href = '/dashboard';
+        }, 1500)
       } else {
         setError(result.error || 'Verification failed')
       }
@@ -239,7 +269,7 @@ const EmailVerification = ({ email, onVerify, onBack, onResendCode }) => {
             <div className="mt-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
               <p className="text-blue-400 text-sm text-center">
                 <strong>Development Mode:</strong> Code: {verificationCode}
-                <div className="inline-flex items-center gap-2 ml-2">
+                <span className="inline-flex items-center gap-2 ml-2">
                 <button
                   type="button"
                   className="inline-flex items-center gap-2 text-blue-300 hover:text-white px-2 py-1 rounded-md border border-blue-300"
@@ -254,7 +284,7 @@ const EmailVerification = ({ email, onVerify, onBack, onResendCode }) => {
                 >
                   Paste & Verify
                 </button>
-                </div>
+                </span>
               </p>
             </div>
           ) : (
@@ -301,7 +331,6 @@ const EmailVerification = ({ email, onVerify, onBack, onResendCode }) => {
                   onKeyDown={(e) => handleKeyDown(index, e)}
                   className="w-12 h-12 bg-slate-700 border border-slate-600 rounded-lg text-white text-center text-xl font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   maxLength={1}
-                  required
                 />
               ))}
             </div>

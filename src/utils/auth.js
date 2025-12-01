@@ -1,6 +1,8 @@
 // src/utils/auth.js
 import { jwtDecode } from 'jwt-decode'
 import { emailService } from './emailService'
+import databaseService from '../services/databaseService'
+import { supabase } from '../services/supabaseClient'
 
 // Shared storage key - same across all browsers
 const SHARED_STORAGE_KEY = 'trading_app_shared_data'
@@ -72,50 +74,79 @@ const auth = {
     emailService.init()
   },
 
-  // Register new user with email verification - ADD THIS FUNCTION
+  // Register new user with email verification
   register: async (name, email, password) => {
     try {
       console.log('auth.register: Starting registration for:', email)
-      const users = getSharedUsers()
 
-      // Check if user already exists
-      const existingUser = users.find((u) => u.email === email)
-      if (existingUser) {
-        console.log('auth.register: User already exists')
-        return { success: false, error: 'User with this email already exists' }
-      }
-
-      // Create new user
-      const newUser = {
-        id: Date.now().toString(),
-        name,
+      // Use Supabase Auth to create user
+      const { data, error } = await supabase.auth.signUp({
         email,
-        password, // In a real app, this should be hashed
-        isVerified: false,
-        createdAt: new Date().toISOString(),
-        authProvider: 'email',
+        password,
+        options: {
+          data: { name },
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+        },
+      })
+
+      if (error) {
+        console.error('Supabase auth error:', error)
+        return { success: false, error: error.message }
       }
 
-      users.push(newUser)
-      saveSharedUsers(users)
-      console.log('auth.register: User created:', newUser.id)
+      const user = data.user
+      if (!user) {
+        return { success: false, error: 'Failed to create user' }
+      }
 
       // Generate verification code
       const verificationCode = generateVerificationCode()
-      const verificationCodes = getSharedVerificationCodes()
+      const expiresAt = Date.now() + 30 * 60 * 1000 // 30 minutes
 
-      verificationCodes[email] = {
+      // Store verification data in sessionStorage
+      const verificationData = {
+        email,
         code: verificationCode,
-        userId: newUser.id,
-        expiresAt: Date.now() + 30 * 60 * 1000, // 30 minutes
+        user: {
+          id: user.id,
+          email: user.email,
+          name: name,
+          isVerified: false,
+        },
+        expiresAt: expiresAt,
       }
 
-      saveSharedVerificationCodes(verificationCodes)
+      sessionStorage.setItem(
+        'pendingVerification',
+        JSON.stringify(verificationData)
+      )
+      console.log(
+        'auth.register: Stored verification data in sessionStorage:',
+        verificationData
+      )
+
+      // Try to store in Supabase (optional - will work even if fails)
+      if (
+        process.env.REACT_APP_SUPABASE_URL &&
+        process.env.REACT_APP_SUPABASE_ANON_KEY
+      ) {
+        try {
+          await databaseService.createVerificationCode(
+            user.id,
+            email,
+            verificationCode,
+            new Date(expiresAt).toISOString()
+          )
+          console.log('auth.register: Verification code stored in Supabase')
+        } catch (err) {
+          console.warn('Failed to create verification code in Supabase:', err)
+          // Continue anyway - we have sessionStorage fallback
+        }
+      }
 
       // Send verification email
       console.log(`Verification code for ${email}: ${verificationCode}`)
 
-      const expiresAt = Date.now() + 30 * 60 * 1000 // 30 minutes
       const emailResult = await emailService.sendVerificationCode(
         email,
         verificationCode,
@@ -124,41 +155,22 @@ const auth = {
       )
 
       if (!emailResult.success) {
-        // If email fails, show code on screen as fallback
-        sessionStorage.setItem(
-          'pendingVerification',
-          JSON.stringify({
-            email: email,
-            code: verificationCode,
-            emailFailed: true,
-          })
-        )
-
         return {
           success: true,
           message: 'Registration successful. Please verify your email.',
-          verificationCode: verificationCode, // Show on screen
+          verificationCode: verificationCode,
           emailSent: false,
           emailError: emailResult.error,
-          user: newUser,
+          user: user,
         }
       }
-
-      // Store pending verification for email verification component
-      sessionStorage.setItem(
-        'pendingVerification',
-        JSON.stringify({
-          email: email,
-          code: verificationCode,
-        })
-      )
 
       return {
         success: true,
         message:
           'Registration successful. Please check your email for verification code.',
         emailSent: true,
-        user: newUser,
+        user: user,
       }
     } catch (error) {
       console.error('Registration error:', error)
@@ -226,6 +238,7 @@ const auth = {
       // Generate app token and login
       const token = generateToken(user)
       localStorage.setItem('tradingToken', token)
+      localStorage.setItem('currentUser', JSON.stringify(user))
 
       return { success: true, user }
     } catch (error) {
@@ -234,58 +247,152 @@ const auth = {
     }
   },
 
-  // Verify email code
+  // Verify email code - FIXED VERSION (handles empty tables)
   verifyEmail: async (email, code) => {
     try {
-      const verificationCodes = getSharedVerificationCodes()
-      const users = getSharedUsers()
+      console.log('auth.verifyEmail: called with', { email, code })
 
-      const verificationData = verificationCodes[email]
-
-      if (!verificationData) {
+      // Get pending verification from sessionStorage
+      const pendingVerification = sessionStorage.getItem('pendingVerification')
+      if (!pendingVerification) {
         return {
           success: false,
-          error: 'No verification request found for this email',
+          error: 'No pending verification found. Please register again.',
         }
       }
 
-      if (verificationData.expiresAt < Date.now()) {
-        delete verificationCodes[email]
-        saveSharedVerificationCodes(verificationCodes)
-        return { success: false, error: 'Verification code has expired' }
+      const verificationData = JSON.parse(pendingVerification)
+      console.log(
+        'auth.verifyEmail: Verification data from session:',
+        verificationData
+      )
+
+      // Check if email matches
+      if (verificationData.email !== email) {
+        return { success: false, error: 'Email mismatch' }
       }
 
+      // Check if code matches
       if (verificationData.code !== code) {
         return { success: false, error: 'Invalid verification code' }
       }
 
-      // Find and update user
-      const userIndex = users.findIndex((u) => u.id === verificationData.userId)
-      if (userIndex === -1) {
-        return { success: false, error: 'User not found' }
+      // Check if expired
+      if (
+        verificationData.expiresAt &&
+        verificationData.expiresAt < Date.now()
+      ) {
+        sessionStorage.removeItem('pendingVerification')
+        return { success: false, error: 'Verification code has expired' }
       }
 
-      // Mark user as verified
-      users[userIndex].isVerified = true
-      saveSharedUsers(users)
+      // Get user from verification data
+      const userFromVerification = verificationData.user
+      if (!userFromVerification) {
+        return { success: false, error: 'User data not found in verification' }
+      }
 
-      // Remove used verification code
-      delete verificationCodes[email]
-      saveSharedVerificationCodes(verificationCodes)
+      // If Supabase is configured, try to update user profile (optional)
+      if (
+        process.env.REACT_APP_SUPABASE_URL &&
+        process.env.REACT_APP_SUPABASE_ANON_KEY
+      ) {
+        try {
+          // Try to create or update user profile in public.users
+          const { data: existingProfile, error: fetchError } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', userFromVerification.id)
 
-      // Generate token and login
-      const token = generateToken(users[userIndex])
-      localStorage.setItem('tradingToken', token)
+          if (fetchError && fetchError.code !== 'PGRST116') {
+            console.warn('Error fetching user profile:', fetchError)
+          }
 
-      // Send welcome email
-      emailService.sendWelcomeEmail(email, users[userIndex].name)
+          if (!existingProfile || existingProfile.length === 0) {
+            // Create new profile
+            const { error: insertError } = await supabase.from('users').insert({
+              id: userFromVerification.id,
+              email: userFromVerification.email,
+              name: userFromVerification.name,
+              is_verified: true,
+              email_verified: true,
+            })
+
+            if (insertError) {
+              console.warn(
+                'Could not create user profile (table might not exist):',
+                insertError
+              )
+            } else {
+              console.log('auth.verifyEmail: User profile created in Supabase')
+            }
+          } else {
+            // Update existing profile
+            const { error: updateError } = await supabase
+              .from('users')
+              .update({
+                is_verified: true,
+                email_verified: true,
+              })
+              .eq('id', userFromVerification.id)
+
+            if (updateError) {
+              console.warn('Could not update user profile:', updateError)
+            } else {
+              console.log('auth.verifyEmail: User profile updated in Supabase')
+            }
+          }
+        } catch (supabaseError) {
+          console.warn(
+            'Supabase operations failed, continuing with local verification:',
+            supabaseError
+          )
+          // Continue anyway - this is optional
+        }
+      }
+
+      // Create app session token
+      const userData = {
+        id: userFromVerification.id,
+        email: userFromVerification.email,
+        name: userFromVerification.name,
+        isVerified: true,
+        emailVerified: true,
+      }
+
+      // Store tokens
+      localStorage.setItem(
+        'tradingToken',
+        btoa(
+          JSON.stringify({
+            ...userData,
+            exp: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
+          })
+        )
+      )
+
+      localStorage.setItem('currentUser', JSON.stringify(userData))
+
+      // Try to send welcome email (optional)
+      try {
+        await emailService.sendWelcomeEmail(email, userData.name)
+      } catch (emailError) {
+        console.warn('Could not send welcome email:', emailError)
+      }
 
       // Clear pending verification
       sessionStorage.removeItem('pendingVerification')
 
+      console.log(
+        'auth.verifyEmail: Verification success for',
+        email,
+        'User:',
+        userData
+      )
       return {
         success: true,
-        user: users[userIndex],
+        user: userData,
+        message: 'Email verified successfully!',
       }
     } catch (error) {
       console.error('Verification error:', error)
@@ -294,28 +401,39 @@ const auth = {
   },
 
   // Login with email/password
-  login: (email, password) => {
+  login: async (email, password) => {
     try {
-      const users = getSharedUsers()
-      const user = users.find(
-        (u) => u.email === email && u.password === password
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      })
+
+      if (error) return { success: false, error: error.message }
+
+      const user = data.user
+      if (!user) return { success: false, error: 'Failed to sign in' }
+
+      const userData = {
+        id: user.id,
+        email: user.email,
+        name: user.user_metadata?.name || 'User',
+        isVerified: true,
+        emailVerified: true,
+      }
+
+      localStorage.setItem(
+        'tradingToken',
+        btoa(
+          JSON.stringify({
+            ...userData,
+            exp: Date.now() + 24 * 60 * 60 * 1000,
+          })
+        )
       )
 
-      if (!user) {
-        return { success: false, error: 'Invalid email or password' }
-      }
+      localStorage.setItem('currentUser', JSON.stringify(userData))
 
-      if (!user.isVerified) {
-        return {
-          success: false,
-          error: 'Please verify your email before logging in',
-        }
-      }
-
-      const token = generateToken(user)
-      localStorage.setItem('tradingToken', token)
-
-      return { success: true, user }
+      return { success: true, user: userData }
     } catch (error) {
       console.error('Login error:', error)
       return { success: false, error: 'Login failed' }
@@ -325,52 +443,46 @@ const auth = {
   // Resend verification code
   resendVerificationCode: async (email) => {
     try {
-      const users = getSharedUsers()
-      const verificationCodes = getSharedVerificationCodes()
+      // Get pending verification from sessionStorage
+      const pendingVerification = sessionStorage.getItem('pendingVerification')
+      if (!pendingVerification) {
+        return { success: false, error: 'No pending verification found' }
+      }
 
-      const user = users.find((u) => u.email === email && !u.isVerified)
-      if (!user) {
-        return { success: false, error: 'User not found or already verified' }
+      const verificationData = JSON.parse(pendingVerification)
+      if (verificationData.email !== email) {
+        return { success: false, error: 'Email mismatch' }
       }
 
       // Generate new verification code
       const verificationCode = generateVerificationCode()
-      verificationCodes[email] = {
+      const expiresAt = Date.now() + 30 * 60 * 1000 // 30 minutes
+
+      // Update verification data
+      const newVerificationData = {
+        ...verificationData,
         code: verificationCode,
-        userId: user.id,
-        expiresAt: Date.now() + 30 * 60 * 1000, // 30 minutes
+        expiresAt: expiresAt,
       }
 
-      saveSharedVerificationCodes(verificationCodes)
-
-      // Send verification email
-      console.log(
-        `Resending verification code to ${email}: ${verificationCode}`
+      sessionStorage.setItem(
+        'pendingVerification',
+        JSON.stringify(newVerificationData)
       )
 
-      const expiresAt = Date.now() + 30 * 60 * 1000 // 30 minutes
+      // Send verification email
       const emailResult = await emailService.sendVerificationCode(
         email,
         verificationCode,
-        user.name,
+        verificationData.user?.name || 'User',
         expiresAt
       )
 
       if (!emailResult.success) {
-        // If email fails, show code on screen as fallback
-        sessionStorage.setItem(
-          'pendingVerification',
-          JSON.stringify({
-            email: email,
-            code: verificationCode,
-            emailFailed: true,
-          })
-        )
-
         return {
           success: true,
           message: 'Verification code generated',
-          verificationCode: verificationCode, // Show on screen
+          verificationCode: verificationCode,
           emailSent: false,
           emailError: emailResult.error,
         }
@@ -387,34 +499,95 @@ const auth = {
     }
   },
 
-  // Request email change - sends verification to newEmail, stores request under userId
+  // Get current user from token
+  getCurrentUser: () => {
+    try {
+      // First check localStorage currentUser (faster)
+      const currentUser = localStorage.getItem('currentUser')
+      if (currentUser) {
+        const userData = JSON.parse(currentUser)
+
+        // Check if token is still valid
+        const token = localStorage.getItem('tradingToken')
+        if (token) {
+          try {
+            const tokenData = JSON.parse(atob(token))
+            if (tokenData.exp && tokenData.exp < Date.now()) {
+              // Token expired
+              localStorage.removeItem('tradingToken')
+              localStorage.removeItem('currentUser')
+              return null
+            }
+          } catch (tokenError) {
+            console.warn('Token error:', tokenError)
+          }
+        }
+
+        return userData
+      }
+
+      // Fall back to token
+      const token = localStorage.getItem('tradingToken')
+      if (!token) return null
+
+      const tokenData = JSON.parse(atob(token))
+
+      // Check if token is expired
+      if (tokenData.exp && tokenData.exp < Date.now()) {
+        localStorage.removeItem('tradingToken')
+        localStorage.removeItem('currentUser')
+        return null
+      }
+
+      return tokenData
+    } catch (error) {
+      console.error('Error getting current user:', error)
+      localStorage.removeItem('tradingToken')
+      localStorage.removeItem('currentUser')
+      return null
+    }
+  },
+
+  // Logout
+  logout: () => {
+    localStorage.removeItem('tradingToken')
+    localStorage.removeItem('currentUser')
+    sessionStorage.removeItem('pendingVerification')
+    supabase.auth.signOut()
+  },
+
+  // Validate token
+  validateToken: (token) => {
+    try {
+      const tokenData = JSON.parse(atob(token))
+      return tokenData.exp && tokenData.exp > Date.now()
+    } catch (error) {
+      return false
+    }
+  },
+
+  // Request email change
   requestEmailChange: async (newEmail) => {
     try {
-      const users = getSharedUsers()
       const tokenUser = auth.getCurrentUser()
       if (!tokenUser) return { success: false, error: 'Not authenticated' }
 
-      // Check if newEmail is already used by another user
-      const existing = users.find(
-        (u) => u.email === newEmail && u.id !== tokenUser.id
-      )
-      if (existing) return { success: false, error: 'Email already in use' }
-
-      const emailChangeRequests = getSharedEmailChangeRequests()
+      // Generate verification code
       const code = generateVerificationCode()
       const expiresAt = Date.now() + 30 * 60 * 1000 // 30 minutes
 
-      emailChangeRequests[tokenUser.id] = {
-        newEmail,
-        code,
-        expiresAt,
-      }
-      saveSharedEmailChangeRequests(emailChangeRequests)
-
-      console.log(
-        `Email change code for user ${tokenUser.id} (oldEmail:${tokenUser.email}) newEmail:${newEmail} code:${code}`
+      // Store in sessionStorage
+      sessionStorage.setItem(
+        'pendingEmailChange',
+        JSON.stringify({
+          userId: tokenUser.id,
+          newEmail,
+          code,
+          expiresAt,
+        })
       )
-      // send verification code to the user's current (old) email to verify identity
+
+      // Send verification email
       const emailResult = await emailService.sendVerificationCode(
         tokenUser.email,
         code,
@@ -424,15 +597,6 @@ const auth = {
       )
 
       if (!emailResult.success) {
-        sessionStorage.setItem(
-          'pendingEmailChange',
-          JSON.stringify({
-            userId: tokenUser.id,
-            newEmail,
-            code,
-            emailFailed: true,
-          })
-        )
         return {
           success: true,
           message: 'Verification code generated',
@@ -441,10 +605,6 @@ const auth = {
         }
       }
 
-      sessionStorage.setItem(
-        'pendingEmailChange',
-        JSON.stringify({ userId: tokenUser.id, newEmail })
-      )
       return {
         success: true,
         message:
@@ -457,47 +617,55 @@ const auth = {
     }
   },
 
-  // Confirm email change: validate code and update user's email once confirmed
+  // Confirm email change
   confirmEmailChange: async (code) => {
     try {
-      const users = getSharedUsers()
       const tokenUser = auth.getCurrentUser()
       if (!tokenUser) return { success: false, error: 'Not authenticated' }
 
-      const emailChangeRequests = getSharedEmailChangeRequests()
-      const request = emailChangeRequests[tokenUser.id]
-      if (!request)
+      // Get pending email change from sessionStorage
+      const pendingEmailChange = sessionStorage.getItem('pendingEmailChange')
+      if (!pendingEmailChange) {
         return { success: false, error: 'No email change request found' }
+      }
 
-      if (request.expiresAt < Date.now()) {
-        delete emailChangeRequests[tokenUser.id]
-        saveSharedEmailChangeRequests(emailChangeRequests)
+      const request = JSON.parse(pendingEmailChange)
+
+      // Check if expired
+      if (request.expiresAt && request.expiresAt < Date.now()) {
+        sessionStorage.removeItem('pendingEmailChange')
         return { success: false, error: 'Verification code expired' }
       }
 
+      // Check if code matches
       if (request.code !== code) {
         return { success: false, error: 'Invalid verification code' }
       }
 
-      // find user and update email
-      const userIndex = users.findIndex((u) => u.id === tokenUser.id)
-      if (userIndex === -1) return { success: false, error: 'User not found' }
+      // Update user data
+      const updatedUserData = {
+        ...tokenUser,
+        email: request.newEmail,
+        emailVerified: true,
+      }
 
-      users[userIndex].email = request.newEmail
-      users[userIndex].isVerified = true
-      saveSharedUsers(users)
+      // Update tokens
+      localStorage.setItem(
+        'tradingToken',
+        btoa(
+          JSON.stringify({
+            ...updatedUserData,
+            exp: Date.now() + 24 * 60 * 60 * 1000,
+          })
+        )
+      )
 
-      // Remove the email change request
-      delete emailChangeRequests[tokenUser.id]
-      saveSharedEmailChangeRequests(emailChangeRequests)
+      localStorage.setItem('currentUser', JSON.stringify(updatedUserData))
 
-      // Update the auth token with new email
-      const updatedToken = generateToken(users[userIndex])
-      localStorage.setItem('tradingToken', updatedToken)
-
-      // Clear any pending session state
+      // Clear pending email change
       sessionStorage.removeItem('pendingEmailChange')
-      return { success: true, user: users[userIndex], message: 'Email updated' }
+
+      return { success: true, user: updatedUserData, message: 'Email updated' }
     } catch (error) {
       console.error('confirmEmailChange error:', error)
       return { success: false, error: 'Failed to confirm email change' }
@@ -509,20 +677,27 @@ const auth = {
     try {
       const tokenUser = auth.getCurrentUser()
       if (!tokenUser) return { success: false, error: 'Not authenticated' }
-      const users = getSharedUsers()
-      const emailChangeRequests = getSharedEmailChangeRequests()
-      const request = emailChangeRequests[tokenUser.id]
-      if (!request)
-        return { success: false, error: 'No email change request found' }
 
+      const pendingEmailChange = sessionStorage.getItem('pendingEmailChange')
+      if (!pendingEmailChange) {
+        return { success: false, error: 'No email change request found' }
+      }
+
+      const request = JSON.parse(pendingEmailChange)
       const code = generateVerificationCode()
       const expiresAt = Date.now() + 30 * 60 * 1000
-      emailChangeRequests[tokenUser.id] = {
-        newEmail: request.newEmail,
-        code,
-        expiresAt,
-      }
-      saveSharedEmailChangeRequests(emailChangeRequests)
+
+      // Update session storage
+      sessionStorage.setItem(
+        'pendingEmailChange',
+        JSON.stringify({
+          ...request,
+          code,
+          expiresAt,
+        })
+      )
+
+      // Send verification email
       const emailResult = await emailService.sendVerificationCode(
         tokenUser.email,
         code,
@@ -530,16 +705,8 @@ const auth = {
         expiresAt,
         { newEmail: request.newEmail, new_email: request.newEmail }
       )
+
       if (!emailResult.success) {
-        sessionStorage.setItem(
-          'pendingEmailChange',
-          JSON.stringify({
-            userId: tokenUser.id,
-            newEmail: request.newEmail,
-            code,
-            emailFailed: true,
-          })
-        )
         return {
           success: true,
           message: 'Verification code generated',
@@ -548,10 +715,6 @@ const auth = {
         }
       }
 
-      sessionStorage.setItem(
-        'pendingEmailChange',
-        JSON.stringify({ userId: tokenUser.id, newEmail: request.newEmail })
-      )
       return { success: true, message: 'Verification code resent' }
     } catch (error) {
       console.error('resendEmailChangeCode error:', error)
@@ -562,55 +725,11 @@ const auth = {
   // Cancel pending email change request
   cancelEmailChangeRequest: async () => {
     try {
-      const tokenUser = auth.getCurrentUser()
-      if (!tokenUser) return { success: false, error: 'Not authenticated' }
-      const emailChangeRequests = getSharedEmailChangeRequests()
-      if (!emailChangeRequests[tokenUser.id])
-        return { success: false, error: 'No pending request' }
-      delete emailChangeRequests[tokenUser.id]
-      saveSharedEmailChangeRequests(emailChangeRequests)
       sessionStorage.removeItem('pendingEmailChange')
       return { success: true, message: 'Email change request canceled' }
     } catch (error) {
       console.error('cancelEmailChangeRequest error:', error)
       return { success: false, error: 'Failed to cancel email change request' }
-    }
-  },
-
-  // Get current user from token
-  getCurrentUser: () => {
-    try {
-      const token = localStorage.getItem('tradingToken')
-      if (!token) return null
-
-      const tokenData = JSON.parse(atob(token))
-
-      // Check if token is expired
-      if (tokenData.exp && tokenData.exp < Date.now()) {
-        localStorage.removeItem('tradingToken')
-        return null
-      }
-
-      return tokenData
-    } catch (error) {
-      console.error('Error getting current user:', error)
-      localStorage.removeItem('tradingToken')
-      return null
-    }
-  },
-
-  // Logout
-  logout: () => {
-    localStorage.removeItem('tradingToken')
-  },
-
-  // Validate token
-  validateToken: (token) => {
-    try {
-      const tokenData = JSON.parse(atob(token))
-      return tokenData.exp && tokenData.exp > Date.now()
-    } catch (error) {
-      return false
     }
   },
 }
@@ -620,32 +739,34 @@ export default auth
 // Update profile (name, email)
 auth.updateProfile = async (name, email) => {
   try {
-    const users = getSharedUsers()
     const tokenUser = auth.getCurrentUser()
     if (!tokenUser) return { success: false, error: 'Not authenticated' }
 
-    const userIndex = users.findIndex((u) => u.id === tokenUser.id)
-    if (userIndex === -1) return { success: false, error: 'User not found' }
-
-    // Check if email is used by someone else
-    const existing = users.find(
-      (u) => u.email === email && u.id !== tokenUser.id
-    )
-    if (existing) return { success: false, error: 'Email already in use' }
-
-    // If the email is changing, request a verification flow instead of updating immediately
-    if (email && email !== users[userIndex].email) {
-      // Request email change that will require verification
+    // If the email is changing, request a verification flow
+    if (email && email !== tokenUser.email) {
       return await auth.requestEmailChange(email)
     }
 
-    users[userIndex].name = name
-    saveSharedUsers(users)
+    // Only name is being updated
+    const updatedUserData = {
+      ...tokenUser,
+      name: name,
+    }
 
-    // Update token with new data
-    const updatedToken = generateToken(users[userIndex])
-    localStorage.setItem('tradingToken', updatedToken)
-    return { success: true, user: users[userIndex] }
+    // Update tokens
+    localStorage.setItem(
+      'tradingToken',
+      btoa(
+        JSON.stringify({
+          ...updatedUserData,
+          exp: Date.now() + 24 * 60 * 60 * 1000,
+        })
+      )
+    )
+
+    localStorage.setItem('currentUser', JSON.stringify(updatedUserData))
+
+    return { success: true, user: updatedUserData }
   } catch (error) {
     console.error('Error updating profile', error)
     return { success: false, error: 'Failed to update profile' }
@@ -655,19 +776,14 @@ auth.updateProfile = async (name, email) => {
 // Update password
 auth.updatePassword = async (currentPassword, newPassword) => {
   try {
-    const users = getSharedUsers()
-    const tokenUser = auth.getCurrentUser()
-    if (!tokenUser) return { success: false, error: 'Not authenticated' }
+    const { error } = await supabase.auth.updateUser({
+      password: newPassword,
+    })
 
-    const userIndex = users.findIndex((u) => u.id === tokenUser.id)
-    if (userIndex === -1) return { success: false, error: 'User not found' }
-
-    if (users[userIndex].password !== currentPassword) {
-      return { success: false, error: 'Current password is incorrect' }
+    if (error) {
+      return { success: false, error: error.message }
     }
 
-    users[userIndex].password = newPassword
-    saveSharedUsers(users)
     return { success: true, message: 'Password updated' }
   } catch (error) {
     console.error('Error updating password', error)
