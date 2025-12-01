@@ -48,3 +48,27 @@ npm install
 # Start development server
 npm run dev
 ```
+
+### Supabase setup
+
+1. Create a Supabase project at https://app.supabase.com
+2. Copy the project URL and the anon public key into `.env` as `REACT_APP_SUPABASE_URL` and `REACT_APP_SUPABASE_ANON_KEY` respectively.
+3. Run the SQL in `supabase/init_schema.sql` to create tables and example RLS policies.
+4. Make sure `REACT_APP_EMAILJS_*` and `REACT_APP_GOOGLE_CLIENT_ID` are set in `.env` for email and Google auth integrations.
+
+Notes:
+
+- The app includes `src/services/supabaseClient.js` and a `databaseService` helper at `src/services/databaseService.js`.
+- RLS policies in the SQL file should be reviewed & adapted to your auth setup. For production use, prefer server-side migrations and server-only admin tasks.
+
+### Migrating local data to Supabase
+
+If you have existing localStorage users/trades that you want to migrate, export your `trading_app_shared_data` JSON from the browser local storage, then use the migration script:
+
+```powershell
+setx SUPABASE_URL "https://your-project.supabase.co"
+setx SUPABASE_SERVICE_ROLE_KEY "your-service-role-key"
+node scripts/migrate_local_to_supabase.js /path/to/trading_app_shared_data_export.json
+```
+
+This script will create auth users using the Supabase Admin API and populate a profile row in the `public.users` table.
