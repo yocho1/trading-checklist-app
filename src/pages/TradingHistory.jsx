@@ -1,60 +1,115 @@
 // src/pages/TradingHistory.jsx
 import React, { useState, useEffect } from 'react';
-import { Filter, Search, Edit, Trash2, Eye, ArrowLeft } from 'lucide-react';
-import auth from '../utils/auth'; // Add this import
+import { Filter, Search, Edit, Trash2, Eye, ArrowLeft, BarChart3 } from 'lucide-react';
+import { tradeService } from '../services/tradeService';
 
 const TradingHistory = () => {
   const [trades, setTrades] = useState([]);
   const [filter, setFilter] = useState('ALL');
   const [searchTerm, setSearchTerm] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [statistics, setStatistics] = useState(null);
 
-  // Load trades from localStorage on component mount
+  // Load trades from Supabase on component mount
   useEffect(() => {
-    const user = auth.getCurrentUser();
-    if (user) {
-      const userTradesKey = `savedTrades_${user.id}`;
-      const savedTrades = JSON.parse(localStorage.getItem(userTradesKey) || '[]');
-      setTrades(savedTrades);
-    }
+    loadTrades();
+    loadStatistics();
   }, []);
+
+  const loadTrades = async () => {
+    setLoading(true);
+    try {
+      const result = await tradeService.getTrades();
+      if (result.success) {
+        setTrades(result.trades || []);
+      } else {
+        console.error('Error loading trades:', result.error);
+      }
+    } catch (error) {
+      console.error('Error loading trades:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadStatistics = async () => {
+    try {
+      const result = await tradeService.getTradeStatistics();
+      if (result.success) {
+        setStatistics(result.statistics);
+      }
+    } catch (error) {
+      console.error('Error loading statistics:', error);
+    }
+  };
 
   // Filter trades based on selected filter and search term
   const filteredTrades = trades.filter(trade => {
     const matchesFilter = filter === 'ALL' || trade.status === filter;
-    const matchesSearch = trade.currencyPair.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         trade.confluenceScore.toString().includes(searchTerm);
+    const matchesSearch = (trade.symbol || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         (trade.notes || '').toLowerCase().includes(searchTerm.toLowerCase());
     return matchesFilter && matchesSearch;
   });
 
-  const deleteTrade = (id) => {
-    const user = auth.getCurrentUser();
-    if (!user) return;
+  const deleteTrade = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this trade?')) return;
     
-    const userTradesKey = `savedTrades_${user.id}`;
-    const updatedTrades = trades.filter(trade => trade.id !== id);
-    setTrades(updatedTrades);
-    localStorage.setItem(userTradesKey, JSON.stringify(updatedTrades));
+    try {
+      const result = await tradeService.deleteTrade(id);
+      if (result.success) {
+        // Remove from local state
+        setTrades(prev => prev.filter(trade => trade.id !== id));
+        // Reload statistics
+        loadStatistics();
+      } else {
+        console.error('Error deleting trade:', result.error);
+      }
+    } catch (error) {
+      console.error('Error deleting trade:', error);
+    }
   };
 
-  const updateTradeStatus = (id, newStatus) => {
-    const user = auth.getCurrentUser(); // Add this
-    if (!user) return;
-    
-    const userTradesKey = `savedTrades_${user.id}`; // Add this
-    const updatedTrades = trades.map(trade => 
-      trade.id === id ? { ...trade, status: newStatus } : trade
-    );
-    setTrades(updatedTrades);
-    localStorage.setItem(userTradesKey, JSON.stringify(updatedTrades)); // Fix this line
+  const updateTradeStatus = async (id, newStatus) => {
+    try {
+      const result = await tradeService.updateTradeStatus(id, newStatus);
+      if (result.success) {
+        // Update local state
+        setTrades(prev => prev.map(trade => 
+          trade.id === id ? result.trade : trade
+        ));
+        // Reload statistics
+        loadStatistics();
+      } else {
+        console.error('Error updating trade status:', result.error);
+      }
+    } catch (error) {
+      console.error('Error updating trade status:', error);
+    }
   };
 
   const goBackToChecklist = () => {
-    window.location.reload(); // Simple navigation back
+    // Use window.history or redirect based on your setup
+    window.location.href = '/checklist';
+  };
+
+  // Function to calculate profit/loss
+  const calculateProfitLoss = (trade) => {
+    if (trade.status !== 'CLOSED' || !trade.entry_price || !trade.exit_price) return null;
+    
+    const entry = parseFloat(trade.entry_price);
+    const exit = parseFloat(trade.exit_price);
+    const positionSize = parseFloat(trade.position_size) || 1;
+    
+    if (trade.direction === 'LONG') {
+      return (exit - entry) * positionSize;
+    } else {
+      return (entry - exit) * positionSize;
+    }
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-200 p-6">
-      <div className="max-w-6xl mx-auto">
+    <div className="min-h-screen bg-slate-900 text-slate-200 p-4 md:p-6">
+      <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-8">
           <button
@@ -64,12 +119,42 @@ const TradingHistory = () => {
             <ArrowLeft size={20} />
             Back to Checklist
           </button>
-          <h1 className="text-3xl font-bold text-white mb-2">Trading History</h1>
-          <p className="text-slate-400">View and manage your trading journal</p>
+          <div className="flex justify-between items-start md:items-center mb-4">
+            <div>
+              <h1 className="text-3xl font-bold text-white mb-2">Trading History</h1>
+              <p className="text-slate-400">View and manage your trading journal</p>
+            </div>
+            
+            {/* Statistics Summary */}
+            {statistics && (
+              <div className="hidden md:flex items-center gap-4 bg-slate-800/50 rounded-lg p-4">
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-white">{statistics.totalTrades}</div>
+                  <div className="text-sm text-slate-400">Total</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-green-400">{statistics.winTrades}</div>
+                  <div className="text-sm text-slate-400">Wins</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-red-400">{statistics.lossTrades}</div>
+                  <div className="text-sm text-slate-400">Losses</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-yellow-400">{statistics.breakevenTrades}</div>
+                  <div className="text-sm text-slate-400">Breakeven</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-blue-400">{statistics.winRate}%</div>
+                  <div className="text-sm text-slate-400">Win Rate</div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Filters and Search */}
-        <div className="bg-slate-800 rounded-xl p-6 mb-6 border border-slate-700">
+        <div className="bg-slate-800 rounded-xl p-4 md:p-6 mb-6 border border-slate-700">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             {/* Filter Buttons */}
             <div className="flex flex-wrap gap-2">
@@ -89,21 +174,48 @@ const TradingHistory = () => {
             </div>
 
             {/* Search Bar */}
-            <div className="relative">
+            <div className="relative w-full md:w-auto">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={20} />
               <input
                 type="text"
-                placeholder="Search trades..."
+                placeholder="Search by symbol or notes..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10 pr-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                className="w-full md:w-64 pl-10 pr-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
             </div>
           </div>
         </div>
 
-        {/* Trades Grid */}
-        {filteredTrades.length === 0 ? (
+        {/* Mobile Statistics */}
+        {statistics && (
+          <div className="md:hidden grid grid-cols-2 gap-4 mb-6">
+            <div className="bg-slate-800 rounded-lg p-4">
+              <div className="text-lg font-bold text-white">{statistics.totalTrades}</div>
+              <div className="text-sm text-slate-400">Total Trades</div>
+            </div>
+            <div className="bg-slate-800 rounded-lg p-4">
+              <div className="text-lg font-bold text-green-400">{statistics.winRate}%</div>
+              <div className="text-sm text-slate-400">Win Rate</div>
+            </div>
+            <div className="bg-slate-800 rounded-lg p-4">
+              <div className="text-lg font-bold text-green-400">{statistics.winTrades}</div>
+              <div className="text-sm text-slate-400">Wins</div>
+            </div>
+            <div className="bg-slate-800 rounded-lg p-4">
+              <div className="text-lg font-bold text-red-400">{statistics.lossTrades}</div>
+              <div className="text-sm text-slate-400">Losses</div>
+            </div>
+          </div>
+        )}
+
+        {/* Loading State */}
+        {loading ? (
+          <div className="text-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-4 border-emerald-500 border-t-transparent mx-auto mb-4"></div>
+            <p className="text-slate-400">Loading your trades...</p>
+          </div>
+        ) : filteredTrades.length === 0 ? (
           <div className="text-center py-12">
             <div className="text-slate-500 text-lg mb-4">
               {trades.length === 0 ? 'No trades saved yet' : 'No trades match your filters'}
@@ -123,8 +235,16 @@ const TradingHistory = () => {
                 trade={trade} 
                 onDelete={deleteTrade}
                 onUpdateStatus={updateTradeStatus}
+                calculateProfitLoss={calculateProfitLoss}
               />
             ))}
+          </div>
+        )}
+
+        {/* Total Results */}
+        {!loading && filteredTrades.length > 0 && (
+          <div className="mt-8 text-center text-slate-400">
+            Showing {filteredTrades.length} of {trades.length} trades
           </div>
         )}
       </div>
@@ -132,8 +252,8 @@ const TradingHistory = () => {
   );
 };
 
-// Trade Card Component
-const TradeCard = ({ trade, onDelete, onUpdateStatus }) => {
+// Updated Trade Card Component
+const TradeCard = ({ trade, onDelete, onUpdateStatus, calculateProfitLoss }) => {
   const getStatusColor = (status) => {
     switch (status) {
       case 'WIN': return 'bg-green-500';
@@ -154,26 +274,30 @@ const TradeCard = ({ trade, onDelete, onUpdateStatus }) => {
     }
   };
 
+  const profitLoss = calculateProfitLoss(trade);
+
   return (
-    <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 hover:border-slate-600 transition-colors">
+    <div className="bg-slate-800 rounded-xl border border-slate-700 p-5 hover:border-slate-600 transition-colors">
       {/* Header */}
       <div className="flex justify-between items-start mb-4">
         <div>
-          <h3 className="text-xl font-bold text-white">{trade.currencyPair}</h3>
-          <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium mt-1 ${getStatusColor(trade.status)}`}>
-            {getStatusText(trade.status)}
+          <h3 className="text-xl font-bold text-white">{trade.symbol || 'Unknown Symbol'}</h3>
+          <div className="flex items-center gap-2 mt-1">
+            <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(trade.status)}`}>
+              {getStatusText(trade.status)}
+            </div>
+            <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+              trade.direction === 'LONG' ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'
+            }`}>
+              {trade.direction || 'LONG'}
+            </div>
           </div>
         </div>
-        <div className="flex gap-2">
-          <button className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors">
-            <Eye size={16} />
-          </button>
-          <button className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors">
-            <Edit size={16} />
-          </button>
+        <div className="flex gap-1">
           <button 
             onClick={() => onDelete(trade.id)}
             className="p-2 text-slate-400 hover:text-red-400 hover:bg-slate-700 rounded-lg transition-colors"
+            title="Delete trade"
           >
             <Trash2 size={16} />
           </button>
@@ -182,29 +306,59 @@ const TradeCard = ({ trade, onDelete, onUpdateStatus }) => {
 
       {/* Trade Details */}
       <div className="space-y-3">
-        <div className="flex justify-between">
-          <span className="text-slate-400">Direction</span>
-          <span className={`font-medium ${trade.direction === 'LONG' ? 'text-green-400' : 'text-red-400'}`}>
-            {trade.direction}
-          </span>
-        </div>
-
-        <div className="flex justify-between">
+        {/* Confluence Score */}
+        <div className="flex justify-between items-center">
           <span className="text-slate-400">Confluence</span>
-          <span className="font-medium text-white">{trade.confluenceScore}%</span>
+          <div className="flex items-center gap-2">
+            <div className="w-24 bg-slate-700 rounded-full h-2">
+              <div 
+                className="bg-emerald-500 h-2 rounded-full" 
+                style={{ width: `${Math.min(trade.confluence_score || 0, 100)}%` }}
+              />
+            </div>
+            <span className="font-medium text-white">{trade.confluence_score || 0}%</span>
+          </div>
         </div>
 
+        {/* Entry Price */}
+        {trade.entry_price && (
+          <div className="flex justify-between">
+            <span className="text-slate-400">Entry Price</span>
+            <span className="font-medium text-white">${parseFloat(trade.entry_price).toFixed(2)}</span>
+          </div>
+        )}
+
+        {/* Exit Price */}
+        {trade.exit_price && (
+          <div className="flex justify-between">
+            <span className="text-slate-400">Exit Price</span>
+            <span className="font-medium text-white">${parseFloat(trade.exit_price).toFixed(2)}</span>
+          </div>
+        )}
+
+        {/* Profit/Loss */}
+        {profitLoss !== null && (
+          <div className="flex justify-between">
+            <span className="text-slate-400">P/L</span>
+            <span className={`font-medium ${profitLoss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              ${profitLoss.toFixed(2)}
+            </span>
+          </div>
+        )}
+
+        {/* Date */}
         <div className="flex justify-between">
           <span className="text-slate-400">Date</span>
           <span className="font-medium text-white">
-            {new Date(trade.date).toLocaleDateString()}
+            {new Date(trade.created_at).toLocaleDateString()}
           </span>
         </div>
 
+        {/* Notes */}
         {trade.notes && (
           <div>
             <span className="text-slate-400">Notes</span>
-            <p className="text-white mt-1 text-sm">{trade.notes}</p>
+            <p className="text-white mt-1 text-sm line-clamp-2">{trade.notes}</p>
           </div>
         )}
       </div>

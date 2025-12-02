@@ -69,9 +69,58 @@ const generateToken = (userData) => {
 
 // Create auth object
 const auth = {
-  // Initialize email service
-  init: () => {
+  // Initialize email service and sync Supabase session
+  init: async () => {
     emailService.init()
+
+    // Try to restore Supabase session from localStorage
+    try {
+      const currentUser = localStorage.getItem('currentUser')
+      if (currentUser) {
+        const userData = JSON.parse(currentUser)
+
+        // Check if we have a Supabase session
+        const {
+          data: { session },
+        } = await supabase.auth.getSession()
+        if (!session && userData.id) {
+          console.log('No active Supabase session found, attempting to sync...')
+          // We might need to sign in again or refresh
+        }
+      }
+    } catch (error) {
+      console.warn('Error initializing auth:', error)
+    }
+  },
+
+  // Get active Supabase session
+  getSupabaseSession: async () => {
+    try {
+      const {
+        data: { session },
+        error,
+      } = await supabase.auth.getSession()
+      if (error) throw error
+      return session
+    } catch (error) {
+      console.error('Error getting Supabase session:', error)
+      return null
+    }
+  },
+
+  // Refresh Supabase session
+  refreshSupabaseSession: async () => {
+    try {
+      const {
+        data: { session },
+        error,
+      } = await supabase.auth.refreshSession()
+      if (error) throw error
+      return session
+    } catch (error) {
+      console.error('Error refreshing Supabase session:', error)
+      return null
+    }
   },
 
   // Register new user with email verification
@@ -548,6 +597,30 @@ const auth = {
     }
   },
 
+  // Get user with Supabase session check
+  getCurrentUserWithSession: async () => {
+    try {
+      const user = auth.getCurrentUser()
+      if (!user) return null
+
+      // Check if we have a valid Supabase session
+      const session = await auth.getSupabaseSession()
+      if (!session) {
+        console.warn('No active Supabase session found for user:', user.email)
+        // Try to refresh session
+        const refreshedSession = await auth.refreshSupabaseSession()
+        if (!refreshedSession) {
+          console.warn('Could not refresh Supabase session')
+        }
+      }
+
+      return user
+    } catch (error) {
+      console.error('Error getting user with session:', error)
+      return null
+    }
+  },
+
   // Logout
   logout: () => {
     localStorage.removeItem('tradingToken')
@@ -730,6 +803,33 @@ const auth = {
     } catch (error) {
       console.error('cancelEmailChangeRequest error:', error)
       return { success: false, error: 'Failed to cancel email change request' }
+    }
+  },
+
+  // Ensure Supabase session is active
+  ensureSupabaseSession: async () => {
+    try {
+      let session = await auth.getSupabaseSession()
+
+      if (!session) {
+        console.log('No Supabase session found, attempting to refresh...')
+        session = await auth.refreshSupabaseSession()
+      }
+
+      if (!session) {
+        console.log('Could not get Supabase session, checking localStorage...')
+        const user = auth.getCurrentUser()
+        if (user) {
+          console.log('Found user in localStorage, but no Supabase session')
+          return { success: false, error: 'No active Supabase session' }
+        }
+        return { success: false, error: 'No user found' }
+      }
+
+      return { success: true, session }
+    } catch (error) {
+      console.error('Error ensuring Supabase session:', error)
+      return { success: false, error: error.message }
     }
   },
 }

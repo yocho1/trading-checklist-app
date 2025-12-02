@@ -1,9 +1,11 @@
 // src/components/modals/SaveTradeModal.jsx
 import React, { useState } from 'react';
-import { X, Upload } from 'lucide-react';
+import { X, Upload, Save, AlertCircle } from 'lucide-react';
 import CurrencyPairSelector from './CurrencyPairSelector';
 import { useTradeCalculations } from '../../hooks/useTradeCalculations';
-import auth from '../../utils/auth'; // Add this import
+import auth from '../../utils/auth';
+import { tradeService } from '../../services/tradeService';
+import { supabase } from '../../services/supabaseClient';
 
 const SaveTradeModal = ({ isOpen, onClose, confluenceScore }) => {
   const [formData, setFormData] = useState({
@@ -18,81 +20,128 @@ const SaveTradeModal = ({ isOpen, onClose, confluenceScore }) => {
     chartImage: null
   });
 
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  
   const calculations = useTradeCalculations(formData);
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    // Validate required fields
     if (!formData.currencyPair || !formData.accountBalance || 
         !formData.stopLossPrice || !formData.takeProfitPrice || 
-        !formData.entryPrice) {
-      alert('Please fill in all required fields');
+        !formData.entryPrice || !formData.notes) {
+      setError('Please fill in all required fields');
       return;
     }
 
-    // Get current user
-    const user = auth.getCurrentUser();
-    if (!user) {
-      alert('Please log in to save trades');
+    if (!formData.chartImage) {
+      setError('Please upload a chart image');
       return;
     }
 
-    const newTrade = {
-      id: Date.now().toString(),
-      userId: user.id, // Use user ID
-      currencyPair: formData.currencyPair,
-      direction: formData.direction,
-      confluenceScore: confluenceScore,
-      accountBalance: parseFloat(formData.accountBalance),
-      stopLossPrice: parseFloat(formData.stopLossPrice),
-      takeProfitPrice: parseFloat(formData.takeProfitPrice),
-      entryPrice: parseFloat(formData.entryPrice),
-      riskPercentage: parseFloat(formData.riskPercentage),
-      lotSize: calculations.lotSize,
-      stopLossPips: calculations.stopLossPips,
-      riskAmount: calculations.riskAmount,
-      date: new Date().toISOString(),
-      status: 'BEFORE',
-      notes: formData.notes,
-      chartImage: formData.chartImage
-    };
+    setSaving(true);
+    setError('');
 
-    // Save to user-specific localStorage
-    const userTradesKey = `savedTrades_${user.id}`; // User-specific key
-    const existingTrades = JSON.parse(localStorage.getItem(userTradesKey) || '[]');
-    const updatedTrades = [...existingTrades, newTrade];
-    localStorage.setItem(userTradesKey, JSON.stringify(updatedTrades)); // Fix: use userTradesKey
+    try {
+      // Ensure Supabase session is active
+      const sessionCheck = await auth.ensureSupabaseSession();
+      if (!sessionCheck.success) {
+        setError(`Authentication error: ${sessionCheck.error}. Please try logging in again.`);
+        return;
+      }
 
-    // Reset form and close modal
-    setFormData({
-      currencyPair: '',
-      direction: 'LONG',
-      accountBalance: '',
-      stopLossPrice: '',
-      takeProfitPrice: '',
-      entryPrice: '',
-      riskPercentage: '2',
-      notes: '',
-      chartImage: null
-    });
-    onClose();
-    
-    alert('Trade saved successfully!');
+      // Get current user
+      const user = auth.getCurrentUser();
+      if (!user) {
+        setError('Please log in to save trades');
+        return;
+      }
+
+      // Prepare trade data for Supabase
+      const tradeData = {
+        currencyPair: formData.currencyPair,
+        symbol: formData.currencyPair, // For compatibility with trades table
+        direction: formData.direction,
+        accountBalance: parseFloat(formData.accountBalance),
+        stopLossPrice: parseFloat(formData.stopLossPrice),
+        stop_loss: parseFloat(formData.stopLossPrice), // For trades table
+        takeProfitPrice: parseFloat(formData.takeProfitPrice),
+        take_profit: parseFloat(formData.takeProfitPrice), // For trades table
+        entryPrice: parseFloat(formData.entryPrice),
+        entry_price: parseFloat(formData.entryPrice), // For trades table
+        riskPercentage: parseFloat(formData.riskPercentage),
+        risk_percentage: parseFloat(formData.riskPercentage), // For trades table
+        confluenceScore: confluenceScore,
+        confluence_score: confluenceScore, // For trades table
+        lotSize: calculations.lotSize,
+        position_size: calculations.lotSize, // For trades table
+        stopLossPips: calculations.stopLossPips,
+        riskAmount: calculations.riskAmount,
+        notes: formData.notes,
+        chartImage: formData.chartImage,
+        status: 'BEFORE',
+        checklist_data: { // Store all form data as JSON
+          confluenceScore,
+          calculations,
+          formData
+        }
+      };
+
+      // Save to Supabase
+      const result = await tradeService.createTrade(tradeData);
+      
+      if (result.success) {
+        // Reset form and close modal
+        setFormData({
+          currencyPair: '',
+          direction: 'LONG',
+          accountBalance: '',
+          stopLossPrice: '',
+          takeProfitPrice: '',
+          entryPrice: '',
+          riskPercentage: '2',
+          notes: '',
+          chartImage: null
+        });
+        
+        onClose();
+
+        setTimeout(() => {
+    window.location.reload();
+  }, 500); // Small delay to show the alert
+        
+        // Show success message
+        alert('Trade saved successfully to your trading journal!');
+      } else {
+        setError(`Failed to save trade: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Error saving trade:', error);
+      setError('An error occurred while saving the trade. Please try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
     if (file) {
       if (file.size > 10 * 1024 * 1024) {
-        alert('File size must be less than 10MB');
+        setError('File size must be less than 10MB');
         return;
       }
       if (!['image/jpeg', 'image/jpg', 'image/png'].includes(file.type)) {
-        alert('Only JPG and PNG files are allowed');
+        setError('Only JPG and PNG files are allowed');
         return;
       }
       
       const reader = new FileReader();
       reader.onload = (e) => {
         setFormData(prev => ({ ...prev, chartImage: e.target.result }));
+        setError(''); // Clear any previous errors
+      };
+      reader.onerror = () => {
+        setError('Failed to upload image. Please try again.');
       };
       reader.readAsDataURL(file);
     }
@@ -105,10 +154,16 @@ const SaveTradeModal = ({ isOpen, onClose, confluenceScore }) => {
       <div className="bg-slate-800 rounded-xl border border-slate-700 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex justify-between items-center p-6 border-b border-slate-700">
-          <h2 className="text-xl font-bold text-white">Save Trade</h2>
+          <div>
+            <h2 className="text-xl font-bold text-white">Save Trade to Journal</h2>
+            <p className="text-slate-400 text-sm mt-1">
+              Save this trade to your Supabase-powered trading journal
+            </p>
+          </div>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-white transition-colors"
+            disabled={saving}
+            className="text-slate-400 hover:text-white transition-colors disabled:opacity-50"
           >
             <X size={24} />
           </button>
@@ -116,6 +171,14 @@ const SaveTradeModal = ({ isOpen, onClose, confluenceScore }) => {
 
         {/* Content */}
         <div className="p-6 space-y-6">
+          {/* Error Message */}
+          {error && (
+            <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 flex items-start gap-3">
+              <AlertCircle className="text-red-400 flex-shrink-0 mt-0.5" size={20} />
+              <span className="text-red-400 text-sm">{error}</span>
+            </div>
+          )}
+
           {/* Confluence Score */}
           <div className="bg-slate-700 rounded-lg p-4 text-center">
             <div className="text-slate-400 text-sm mb-1">Confluence Score</div>
@@ -133,7 +196,11 @@ const SaveTradeModal = ({ isOpen, onClose, confluenceScore }) => {
             </label>
             <CurrencyPairSelector
               value={formData.currencyPair}
-              onChange={(pair) => setFormData(prev => ({ ...prev, currencyPair: pair }))}
+              onChange={(pair) => {
+                setFormData(prev => ({ ...prev, currencyPair: pair }));
+                setError('');
+              }}
+              disabled={saving}
             />
           </div>
 
@@ -147,8 +214,12 @@ const SaveTradeModal = ({ isOpen, onClose, confluenceScore }) => {
                 <button
                   key={direction}
                   type="button"
-                  onClick={() => setFormData(prev => ({ ...prev, direction }))}
-                  className={`flex-1 py-3 px-4 rounded-lg font-medium transition-colors ${
+                  onClick={() => {
+                    setFormData(prev => ({ ...prev, direction }));
+                    setError('');
+                  }}
+                  disabled={saving}
+                  className={`flex-1 py-3 px-4 rounded-lg font-medium transition-colors disabled:opacity-50 ${
                     formData.direction === direction
                       ? direction === 'LONG'
                         ? 'bg-green-600 text-white'
@@ -171,9 +242,13 @@ const SaveTradeModal = ({ isOpen, onClose, confluenceScore }) => {
             <input
               type="number"
               value={formData.accountBalance}
-              onChange={(e) => setFormData(prev => ({ ...prev, accountBalance: e.target.value }))}
+              onChange={(e) => {
+                setFormData(prev => ({ ...prev, accountBalance: e.target.value }));
+                setError('');
+              }}
               placeholder="10,000"
-              className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-3 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              disabled={saving}
+              className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-3 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
             />
           </div>
 
@@ -191,9 +266,13 @@ const SaveTradeModal = ({ isOpen, onClose, confluenceScore }) => {
                   type="number"
                   step="0.00001"
                   value={formData.stopLossPrice}
-                  onChange={(e) => setFormData(prev => ({ ...prev, stopLossPrice: e.target.value }))}
+                  onChange={(e) => {
+                    setFormData(prev => ({ ...prev, stopLossPrice: e.target.value }));
+                    setError('');
+                  }}
                   placeholder="1.08000"
-                  className="w-full bg-slate-600 border border-slate-500 rounded-lg px-3 py-2 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  disabled={saving}
+                  className="w-full bg-slate-600 border border-slate-500 rounded-lg px-3 py-2 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
                 />
               </div>
 
@@ -206,9 +285,13 @@ const SaveTradeModal = ({ isOpen, onClose, confluenceScore }) => {
                   type="number"
                   step="0.00001"
                   value={formData.takeProfitPrice}
-                  onChange={(e) => setFormData(prev => ({ ...prev, takeProfitPrice: e.target.value }))}
+                  onChange={(e) => {
+                    setFormData(prev => ({ ...prev, takeProfitPrice: e.target.value }));
+                    setError('');
+                  }}
                   placeholder="1.09000"
-                  className="w-full bg-slate-600 border border-slate-500 rounded-lg px-3 py-2 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  disabled={saving}
+                  className="w-full bg-slate-600 border border-slate-500 rounded-lg px-3 py-2 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
                 />
               </div>
 
@@ -221,9 +304,13 @@ const SaveTradeModal = ({ isOpen, onClose, confluenceScore }) => {
                   type="number"
                   step="0.00001"
                   value={formData.entryPrice}
-                  onChange={(e) => setFormData(prev => ({ ...prev, entryPrice: e.target.value }))}
+                  onChange={(e) => {
+                    setFormData(prev => ({ ...prev, entryPrice: e.target.value }));
+                    setError('');
+                  }}
                   placeholder="1.08500"
-                  className="w-full bg-slate-600 border border-slate-500 rounded-lg px-3 py-2 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  disabled={saving}
+                  className="w-full bg-slate-600 border border-slate-500 rounded-lg px-3 py-2 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
                 />
               </div>
 
@@ -236,9 +323,13 @@ const SaveTradeModal = ({ isOpen, onClose, confluenceScore }) => {
                   type="number"
                   step="0.1"
                   value={formData.riskPercentage}
-                  onChange={(e) => setFormData(prev => ({ ...prev, riskPercentage: e.target.value }))}
+                  onChange={(e) => {
+                    setFormData(prev => ({ ...prev, riskPercentage: e.target.value }));
+                    setError('');
+                  }}
                   placeholder="2"
-                  className="w-full bg-slate-600 border border-slate-500 rounded-lg px-3 py-2 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  disabled={saving}
+                  className="w-full bg-slate-600 border border-slate-500 rounded-lg px-3 py-2 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
                 />
               </div>
             </div>
@@ -247,25 +338,46 @@ const SaveTradeModal = ({ isOpen, onClose, confluenceScore }) => {
           {/* Calculated Lot Size */}
           <div className="bg-slate-700 rounded-lg p-4">
             <h3 className="text-white font-medium mb-2">Calculated Lot Size</h3>
-            <div className="text-slate-400 text-sm mb-4">
+            <div className="text-slate-400 text-sm mb-2">
               {calculations.stopLossPips > 0 
-                ? `Lot Size: ${calculations.lotSize.toFixed(2)} | Risk: $${calculations.riskAmount.toFixed(2)} | SL Pips: ${calculations.stopLossPips}`
+                ? `Based on your inputs, the system calculates:`
                 : 'Enter Stop Loss to calculate lot size'
               }
             </div>
+            {calculations.stopLossPips > 0 && (
+              <div className="grid grid-cols-3 gap-3">
+                <div className="text-center p-2 bg-slate-800 rounded">
+                  <div className="text-emerald-400 font-bold text-lg">{calculations.lotSize.toFixed(2)}</div>
+                  <div className="text-xs text-slate-400">Lot Size</div>
+                </div>
+                <div className="text-center p-2 bg-slate-800 rounded">
+                  <div className="text-emerald-400 font-bold text-lg">${calculations.riskAmount.toFixed(2)}</div>
+                  <div className="text-xs text-slate-400">Risk Amount</div>
+                </div>
+                <div className="text-center p-2 bg-slate-800 rounded">
+                  <div className="text-emerald-400 font-bold text-lg">{calculations.stopLossPips}</div>
+                  <div className="text-xs text-slate-400">SL Pips</div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Notes */}
           <div>
             <label className="block text-white text-sm font-medium mb-2">
               Notes *
+              <span className="text-slate-400 text-xs ml-2">(Required for journaling)</span>
             </label>
             <textarea
               value={formData.notes}
-              onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
-              placeholder="Add your trade notes here..."
+              onChange={(e) => {
+                setFormData(prev => ({ ...prev, notes: e.target.value }));
+                setError('');
+              }}
+              placeholder="Why are you taking this trade? What's the setup? Market conditions? Emotions? Lessons learned..."
               rows="4"
-              className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-3 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              disabled={saving}
+              className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-3 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
             />
           </div>
 
@@ -273,15 +385,26 @@ const SaveTradeModal = ({ isOpen, onClose, confluenceScore }) => {
           <div>
             <label className="block text-white text-sm font-medium mb-2">
               Chart Image (Before Trade) *
+              <span className="text-slate-400 text-xs ml-2">(Required for journaling)</span>
             </label>
             <div 
-              onClick={() => document.getElementById('chart-upload').click()}
-              className="border-2 border-dashed border-slate-600 rounded-lg p-8 text-center cursor-pointer hover:border-slate-500 transition-colors"
+              onClick={() => !saving && document.getElementById('chart-upload').click()}
+              className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+                saving ? 'border-slate-700 cursor-not-allowed opacity-50' :
+                formData.chartImage ? 'border-emerald-500/30' : 'border-slate-600 hover:border-slate-500'
+              }`}
             >
               {formData.chartImage ? (
                 <div className="text-emerald-400">
-                  <div className="text-sm font-medium">Image uploaded successfully</div>
-                  <div className="text-xs text-slate-400 mt-1">Click to change</div>
+                  <div className="text-sm font-medium">✓ Image uploaded successfully</div>
+                  <div className="text-xs text-slate-400 mt-1">Click to change image</div>
+                  <div className="mt-2">
+                    <img 
+                      src={formData.chartImage} 
+                      alt="Chart preview" 
+                      className="mx-auto max-h-32 rounded-lg border border-slate-600"
+                    />
+                  </div>
                 </div>
               ) : (
                 <>
@@ -295,6 +418,7 @@ const SaveTradeModal = ({ isOpen, onClose, confluenceScore }) => {
                 type="file"
                 accept="image/jpeg,image/jpg,image/png"
                 onChange={handleImageUpload}
+                disabled={saving}
                 className="hidden"
               />
             </div>
@@ -305,16 +429,39 @@ const SaveTradeModal = ({ isOpen, onClose, confluenceScore }) => {
         <div className="flex gap-3 p-6 border-t border-slate-700">
           <button
             onClick={onClose}
-            className="flex-1 py-3 px-4 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium transition-colors"
+            disabled={saving}
+            className="flex-1 py-3 px-4 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Cancel
           </button>
           <button
             onClick={handleSave}
-            className="flex-1 py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium transition-colors"
+            disabled={saving}
+            className="flex-1 py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
-            Save Trade
+            {saving ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                Saving to Supabase...
+              </>
+            ) : (
+              <>
+                <Save size={18} />
+                Save to Trading Journal
+              </>
+            )}
           </button>
+        </div>
+
+        {/* Info Footer */}
+        <div className="p-4 border-t border-slate-700 bg-slate-900/50 rounded-b-xl">
+          <div className="text-xs text-slate-500 text-center">
+            ✓ Trades are saved to your secure Supabase database
+            <br />
+            ✓ Access your full trading history anytime
+            <br />
+            ✓ Analyze performance with detailed statistics
+          </div>
         </div>
       </div>
     </div>
