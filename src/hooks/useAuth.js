@@ -8,7 +8,6 @@ import {
   googleLogin,
   logoutUser,
   checkAuth,
-  initializeUserSampleData,
 } from '../services/mockBackend'
 
 export const useAuth = () => {
@@ -16,41 +15,27 @@ export const useAuth = () => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  // Helper to get demo user from localStorage
-  const getDemoUser = useCallback(() => {
+  // Helper to get last logged-in user from localStorage (NOT demo user)
+  const getLastLoggedInUser = useCallback(() => {
     try {
-      const data = localStorage.getItem('trading_app_shared_data')
-      if (data) {
-        const parsed = JSON.parse(data)
-        // Look for demo user by email or take first user
-        const demoUser = parsed.users?.find(
-          (u) => u.email.includes('demo') || u.email.includes('example')
-        )
-        if (demoUser) {
+      // Check if there's a saved current user (set during login)
+      const currentUser = localStorage.getItem('currentUser')
+      if (currentUser) {
+        const parsed = JSON.parse(currentUser)
+        // Only restore if it's NOT a demo user
+        if (
+          parsed &&
+          parsed.id &&
+          !parsed.email?.includes('demo') &&
+          !parsed.email?.includes('example')
+        ) {
           return {
-            id: demoUser.id,
-            name: demoUser.name,
-            email: demoUser.email,
-            isVerified: demoUser.isVerified,
-            createdAt: demoUser.createdAt,
-            settings: demoUser.settings || {
-              theme: 'dark',
-              notifications: true,
-              defaultTimeframe: '1h',
-              riskPerTrade: 1,
-            },
-          }
-        }
-        // If no demo user, use first user
-        if (parsed.users?.[0]) {
-          const firstUser = parsed.users[0]
-          return {
-            id: firstUser.id,
-            name: firstUser.name,
-            email: firstUser.email,
-            isVerified: firstUser.isVerified,
-            createdAt: firstUser.createdAt,
-            settings: firstUser.settings || {
+            id: parsed.id,
+            name: parsed.name,
+            email: parsed.email,
+            isVerified: parsed.isVerified,
+            createdAt: parsed.createdAt,
+            settings: parsed.settings || {
               theme: 'dark',
               notifications: true,
               defaultTimeframe: '1h',
@@ -60,7 +45,7 @@ export const useAuth = () => {
         }
       }
     } catch (error) {
-      console.error('Error getting demo user:', error)
+      console.error('Error getting last logged-in user:', error)
     }
     return null
   }, [])
@@ -79,59 +64,21 @@ export const useAuth = () => {
       try {
         console.log('Initializing authentication...')
 
-        // First, try to get demo user from localStorage
-        const demoUser = getDemoUser()
+        // First, try to get last logged-in user (not demo user)
+        const lastUser = getLastLoggedInUser()
 
-        if (demoUser) {
-          console.log('Demo user found, auto-logging in:', demoUser.email)
-          setUser(demoUser)
-
-          // Initialize sample data for this user
-          await initializeUserSampleData(demoUser.id)
+        if (lastUser) {
+          console.log('Restoring last logged-in user:', lastUser.email)
+          setUser(lastUser)
         } else {
-          // Fall back to regular auth check
-          console.log('No demo user found, checking regular auth...')
-          const authResult = await checkAuth()
-          if (authResult.authenticated) {
-            console.log('Regular auth successful:', authResult.user.email)
-            setUser(authResult.user)
-
-            // Initialize sample data for new users
-            if (authResult.user) {
-              await initializeUserSampleData(authResult.user.id)
-            }
-          } else {
-            console.log('No user authenticated')
-          }
+          // No last logged-in user found
+          console.log('No previously logged-in user found')
+          console.log('User must manually log in')
         }
       } catch (error) {
         console.error('Auth initialization failed:', error)
-
-        // Create a fallback demo user
-        const fallbackUser = {
-          id: 'fallback_user_' + Date.now(),
-          name: 'Demo Trader',
-          email: 'demo@fallback.com',
-          isVerified: true,
-          createdAt: new Date().toISOString(),
-          settings: {
-            theme: 'dark',
-            notifications: true,
-            defaultTimeframe: '1h',
-            riskPerTrade: 1,
-          },
-        }
-
-        setUser(fallbackUser)
-
-        // Initialize data for fallback user
-        setTimeout(async () => {
-          try {
-            await initializeUserSampleData(fallbackUser.id)
-          } catch (e) {
-            console.error('Failed to initialize fallback data:', e)
-          }
-        }, 500)
+        // Don't auto-login to demo user on error, just stay logged out
+        console.log('Staying logged out until user manually logs in')
       } finally {
         // Ensure loading stops after a timeout
         setTimeout(() => {
@@ -153,7 +100,7 @@ export const useAuth = () => {
     return () => {
       window.removeEventListener('setUser', handleSetUser)
     }
-  }, [getDemoUser])
+  }, [getLastLoggedInUser])
 
   const login = async (email, password) => {
     setLoading(true)
@@ -161,13 +108,26 @@ export const useAuth = () => {
 
     try {
       console.log('Attempting login for:', email)
+
+      // First check if user is already logged in with same email
+      const currentUser = localStorage.getItem('currentUser')
+      if (currentUser) {
+        const parsedUser = JSON.parse(currentUser)
+        if (parsedUser.email === email && parsedUser.isVerified) {
+          console.log('User already logged in, restoring from localStorage')
+          setUser(parsedUser)
+          return { success: true }
+        }
+      }
+
+      // Otherwise, perform normal login
       const result = await loginUser(email, password)
       console.log('Login successful:', result.user.email)
 
       setUser(result.user)
 
-      // Initialize sample data if needed
-      await initializeUserSampleData(result.user.id)
+      // Save this user as the current logged-in user
+      localStorage.setItem('currentUser', JSON.stringify(result.user))
 
       return { success: true }
     } catch (error) {
@@ -179,12 +139,13 @@ export const useAuth = () => {
     }
   }
 
-  const register = async (userData) => {
+  const register = async (name, email, password) => {
     setLoading(true)
     setError(null)
 
     try {
-      console.log('Registering new user:', userData.email)
+      console.log('Registering new user:', email)
+      const userData = { name, email, password }
       const result = await registerUser(userData)
       console.log('Registration successful, user ID:', result.userId)
 
@@ -192,7 +153,7 @@ export const useAuth = () => {
         success: true,
         userId: result.userId,
         verificationCode: result.verificationCode,
-        email: userData.email,
+        email: email,
       }
     } catch (error) {
       console.error('Registration failed:', error.message)
@@ -212,10 +173,12 @@ export const useAuth = () => {
       const result = await verifyEmail(email, code)
       console.log('Email verification successful')
 
-      // Auto-login after verification
-      const loginResult = await loginUser(email, 'password123') // Password from registration
-      if (loginResult.success) {
-        setUser(loginResult.user)
+      // Auto-login after verification - use the verified user from result
+      if (result.user) {
+        setUser(result.user)
+
+        // Save this user as the current logged-in user
+        localStorage.setItem('currentUser', JSON.stringify(result.user))
       }
 
       return { success: true, message: result.message }
@@ -251,17 +214,32 @@ export const useAuth = () => {
     }
   }
 
-  const googleSignIn = async () => {
+  const googleSignIn = async (googleResponse) => {
     setLoading(true)
     setError(null)
 
     try {
-      console.log('Google login attempt')
-      const result = await googleLogin()
+      console.log(
+        'Google login attempt',
+        googleResponse ? 'with credential' : 'without credential'
+      )
+      const result = await googleLogin(googleResponse)
       console.log('Google login successful:', result.user.email)
 
+      // Check if this is a new user (newly created from Google)
+      const isNewUser = result.isNewUser || false
+
       setUser(result.user)
-      return { success: true }
+
+      // Save this user as the current logged-in user
+      localStorage.setItem('currentUser', JSON.stringify(result.user))
+
+      // Mark if this is a new Google user for welcome page
+      if (isNewUser) {
+        sessionStorage.setItem('isNewGoogleUser', 'true')
+      }
+
+      return { success: true, isNewUser }
     } catch (error) {
       console.error('Google login failed:', error.message)
       setError(error.message)
@@ -278,6 +256,10 @@ export const useAuth = () => {
       console.log('Logging out user:', user?.email)
       await logoutUser()
       setUser(null)
+
+      // Clear the saved current user
+      localStorage.removeItem('currentUser')
+
       setError(null)
       console.log('Logout successful')
     } catch (error) {
@@ -313,14 +295,7 @@ export const useAuth = () => {
     const event = new CustomEvent('setUser', { detail: demoUser })
     window.dispatchEvent(event)
 
-    // Initialize data
-    setTimeout(async () => {
-      try {
-        await initializeUserSampleData(demoUser.id)
-      } catch (e) {
-        console.error('Failed to initialize demo data:', e)
-      }
-    }, 500)
+    // Demo user created without sample data
   }
 
   return {

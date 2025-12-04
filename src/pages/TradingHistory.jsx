@@ -23,10 +23,34 @@ const TradingHistory = () => {
       if (result.success) {
         setTrades(result.trades || []);
       } else {
-        console.error('Error loading trades:', result.error);
+        // Fallback to localStorage if Supabase fails
+        console.log('Supabase unavailable, loading trades from localStorage...');
+        try {
+          const data = localStorage.getItem('trading_app_shared_data');
+          if (data) {
+            const parsed = JSON.parse(data);
+            const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+            
+            console.log('Current user ID:', currentUser.id);
+            console.log('Total trades in storage:', parsed.trades?.length || 0);
+            console.log('All trades:', parsed.trades);
+            
+            // Get trades for current user
+            const userTrades = (parsed.trades || []).filter(t => t.userId === currentUser.id);
+            setTrades(userTrades);
+            console.log(`Loaded ${userTrades.length} trades from localStorage for user ${currentUser.id}`);
+          } else {
+            console.error('Error loading trades:', result.error);
+            setTrades([]);
+          }
+        } catch (localError) {
+          console.error('Error loading trades from localStorage:', localError);
+          setTrades([]);
+        }
       }
     } catch (error) {
       console.error('Error loading trades:', error);
+      setTrades([]);
     } finally {
       setLoading(false);
     }
@@ -37,6 +61,32 @@ const TradingHistory = () => {
       const result = await tradeService.getTradeStatistics();
       if (result.success) {
         setStatistics(result.statistics);
+      } else {
+        // Fallback to calculate statistics from localStorage
+        console.log('Supabase unavailable, calculating statistics from localStorage...');
+        try {
+          const data = localStorage.getItem('trading_app_shared_data');
+          if (data) {
+            const parsed = JSON.parse(data);
+            const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+            
+            // Get trades for current user
+            const userTrades = (parsed.trades || []).filter(t => t.userId === currentUser.id);
+            
+            // Calculate basic statistics
+            const stats = {
+              totalTrades: userTrades.length,
+              winTrades: userTrades.filter(t => t.status === 'WIN').length,
+              lossTrades: userTrades.filter(t => t.status === 'LOSS').length,
+              breakEvenTrades: userTrades.filter(t => t.status === 'BREAKEVEN').length,
+              pendingTrades: userTrades.filter(t => t.status === 'BEFORE' || t.status === 'RUNNING').length,
+            };
+            
+            setStatistics(stats);
+          }
+        } catch (localError) {
+          console.error('Error calculating statistics from localStorage:', localError);
+        }
       }
     } catch (error) {
       console.error('Error loading statistics:', error);
@@ -62,7 +112,20 @@ const TradingHistory = () => {
         // Reload statistics
         loadStatistics();
       } else {
-        console.error('Error deleting trade:', result.error);
+        // Fallback to delete from localStorage
+        console.log('Supabase unavailable, deleting trade from localStorage...');
+        try {
+          const data = localStorage.getItem('trading_app_shared_data');
+          if (data) {
+            const parsed = JSON.parse(data);
+            parsed.trades = (parsed.trades || []).filter(t => t.id !== id);
+            localStorage.setItem('trading_app_shared_data', JSON.stringify(parsed));
+            setTrades(prev => prev.filter(trade => trade.id !== id));
+            loadStatistics();
+          }
+        } catch (localError) {
+          console.error('Error deleting trade from localStorage:', localError);
+        }
       }
     } catch (error) {
       console.error('Error deleting trade:', error);
@@ -80,7 +143,26 @@ const TradingHistory = () => {
         // Reload statistics
         loadStatistics();
       } else {
-        console.error('Error updating trade status:', result.error);
+        // Fallback to update in localStorage
+        console.log('Supabase unavailable, updating trade status in localStorage...');
+        try {
+          const data = localStorage.getItem('trading_app_shared_data');
+          if (data) {
+            const parsed = JSON.parse(data);
+            const tradeIndex = (parsed.trades || []).findIndex(t => t.id === id);
+            if (tradeIndex >= 0) {
+              parsed.trades[tradeIndex].status = newStatus;
+              parsed.trades[tradeIndex].updatedAt = new Date().toISOString();
+              localStorage.setItem('trading_app_shared_data', JSON.stringify(parsed));
+              setTrades(prev => prev.map(trade => 
+                trade.id === id ? { ...trade, status: newStatus } : trade
+              ));
+              loadStatistics();
+            }
+          }
+        } catch (localError) {
+          console.error('Error updating trade status in localStorage:', localError);
+        }
       }
     } catch (error) {
       console.error('Error updating trade status:', error);

@@ -109,7 +109,12 @@ const Register = ({ onRegister, onSwitchToLogin, onGoogleLogin, onVerify, onRese
           }));
         }
       } else {
+        console.log('Register: Registration failed:', result.error);
         setError(result.error || 'Registration failed. Please try again.');
+        // Clear any old verification codes from sessionStorage
+        sessionStorage.removeItem('pendingVerification');
+        // Make sure we're not showing the verification screen
+        setShowVerification(false);
         if (result.emailError || result.details) {
           console.warn('Register: email error/details:', result.emailError, result.details)
           setError(prev => prev + (result.emailError ? ' - ' + result.emailError : '') + (result.details ? ' - ' + result.details : ''))
@@ -156,8 +161,8 @@ const Register = ({ onRegister, onSwitchToLogin, onGoogleLogin, onVerify, onRese
     }
   }
 
-  // Show verification component if needed
-  if (showVerification && pendingUser) {
+  // Show verification component if needed (but NOT if there's an error)
+  if (showVerification && pendingUser && !error) {
     return (
       <EmailVerification
         email={pendingUser.email}
@@ -171,6 +176,8 @@ const Register = ({ onRegister, onSwitchToLogin, onGoogleLogin, onVerify, onRese
       />
     );
   }
+
+  console.log('Register: Rendering form. Error:', error, 'Loading:', loading, 'ShowVerification:', showVerification);
 
   return (
     <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">

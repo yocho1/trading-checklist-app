@@ -7,7 +7,7 @@ import auth from '../../utils/auth';
 import { tradeService } from '../../services/tradeService';
 import { supabase } from '../../services/supabaseClient';
 
-const SaveTradeModal = ({ isOpen, onClose, confluenceScore }) => {
+const SaveTradeModal = ({ isOpen, onClose, confluenceScore, onTradeSaved }) => {
   const [formData, setFormData] = useState({
     currencyPair: '',
     direction: 'LONG',
@@ -26,10 +26,14 @@ const SaveTradeModal = ({ isOpen, onClose, confluenceScore }) => {
   const calculations = useTradeCalculations(formData);
 
   const handleSave = async () => {
+    console.log('=== SAVE TRADE STARTED ===');
+    console.log('Form data:', formData);
+    
     // Validate required fields
     if (!formData.currencyPair || !formData.accountBalance || 
         !formData.stopLossPrice || !formData.takeProfitPrice || 
         !formData.entryPrice || !formData.notes) {
+      console.error('Validation failed: Missing required fields');
       setError('Please fill in all required fields');
       return;
     }
@@ -43,19 +47,27 @@ const SaveTradeModal = ({ isOpen, onClose, confluenceScore }) => {
     setError('');
 
     try {
-      // Ensure Supabase session is active
-      const sessionCheck = await auth.ensureSupabaseSession();
-      if (!sessionCheck.success) {
-        setError(`Authentication error: ${sessionCheck.error}. Please try logging in again.`);
-        return;
-      }
-
-      // Get current user
-      const user = auth.getCurrentUser();
+      // Get current user - try multiple sources
+      let user = auth.getCurrentUser();
       if (!user) {
+        // Fallback to localStorage currentUser
+        const currentUserData = localStorage.getItem('currentUser');
+        if (currentUserData) {
+          user = JSON.parse(currentUserData);
+        }
+      }
+      
+      if (!user || !user.id) {
         setError('Please log in to save trades');
+        setSaving(false);
         return;
       }
+      
+      console.log('Saving trade for user:', user.id, user.email);
+      
+      // Check if we have a Supabase session, but don't fail if we don't
+      const sessionCheck = await auth.ensureSupabaseSession();
+      const hasSupabaseSession = sessionCheck.success;
 
       // Prepare trade data for Supabase
       const tradeData = {
@@ -87,8 +99,42 @@ const SaveTradeModal = ({ isOpen, onClose, confluenceScore }) => {
         }
       };
 
-      // Save to Supabase
-      const result = await tradeService.createTrade(tradeData);
+      // Save to Supabase if session available, otherwise fallback to localStorage
+      let result;
+      
+      if (hasSupabaseSession) {
+        result = await tradeService.createTrade(tradeData);
+      } else {
+        // Fallback: Save to localStorage
+        console.log('No Supabase session, saving to localStorage for user:', user.id);
+        try {
+          const data = localStorage.getItem('trading_app_shared_data');
+          const parsed = data ? JSON.parse(data) : { users: [], trades: [], verificationCodes: {}, dashboardSettings: {} };
+          
+          const newTrade = {
+            id: Date.now().toString(),
+            userId: user.id,
+            ...tradeData,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
+          
+          console.log('New trade object:', newTrade);
+          console.log('Current trades count before save:', parsed.trades?.length || 0);
+          
+          parsed.trades = parsed.trades || [];
+          parsed.trades.push(newTrade);
+          
+          console.log('Trades count after adding:', parsed.trades.length);
+          
+          localStorage.setItem('trading_app_shared_data', JSON.stringify(parsed));
+          console.log('Trade saved to localStorage successfully');
+          
+          result = { success: true, trade: newTrade };
+        } catch (err) {
+          result = { success: false, error: err.message };
+        }
+      }
       
       if (result.success) {
         // Reset form and close modal
@@ -106,12 +152,15 @@ const SaveTradeModal = ({ isOpen, onClose, confluenceScore }) => {
         
         onClose();
 
-        setTimeout(() => {
-    window.location.reload();
-  }, 500); // Small delay to show the alert
-        
         // Show success message
         alert('Trade saved successfully to your trading journal!');
+        
+        // Call the callback to refresh data
+        if (onTradeSaved) {
+          onTradeSaved(result.trade);
+        }
+        
+        // Don't reload - let the parent handle navigation/refresh
       } else {
         setError(`Failed to save trade: ${result.error}`);
       }

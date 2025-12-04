@@ -1,6 +1,6 @@
 // src/App.jsx
 import React, { useState, useEffect } from 'react';
-import { Save, History, LogOut, User, Home, BarChart3 } from 'lucide-react';
+import { Save, History, LogOut, User, Home, TrendingUp } from 'lucide-react';
 
 // Components
 import { ScoreCard } from './components/layout/ScoreCard';
@@ -9,6 +9,7 @@ import SaveTradeModal from './components/modals/SaveTradeModal';
 import TradingHistory from './pages/TradingHistory';
 import Account from './pages/Account';
 import Dashboard from './pages/Dashboard';
+import Welcome from './pages/Welcome';
 import Login from './components/auth/Login';
 import Register from './components/auth/Register';
 
@@ -26,6 +27,7 @@ const TradingChecklistApp = () => {
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [currentView, setCurrentView] = useState('dashboard');
   const [authView, setAuthView] = useState('login');
+  const [showWelcome, setShowWelcome] = useState(false);
   
   const { totalScore, timeframeScores } = useScoreCalculator(checkedItems);
   const { user, login, register, verifyEmail, resendVerificationCode, googleLogin, logout, loading } = useAuth();
@@ -54,6 +56,14 @@ const TradingChecklistApp = () => {
       }
     }
   }, []);
+
+  // Check if user just registered with Google
+  useEffect(() => {
+    if (user && sessionStorage.getItem('isNewGoogleUser') === 'true') {
+      setShowWelcome(true)
+      sessionStorage.removeItem('isNewGoogleUser')
+    }
+  }, [user]);
 
   // Ensure user has trades when they log in
   useEffect(() => {
@@ -107,32 +117,16 @@ const TradingChecklistApp = () => {
 
   // Handle trade saved from modal
   const handleTradeSaved = (newTrade) => {
+    console.log('Trade saved callback triggered:', newTrade);
     if (addNewTrade) {
       addNewTrade(newTrade);
     }
     refreshData(); // Refresh dashboard data
-  };
-
-  // Quick demo login
-  const handleDemoLogin = () => {
-    // Create demo user
-    const demoUser = {
-      id: 'demo_user_123',
-      name: 'Demo Trader',
-      email: 'demo@trading.com',
-      isVerified: true,
-      createdAt: new Date().toISOString(),
-      settings: {
-        theme: 'dark',
-        notifications: true,
-        defaultTimeframe: '1h',
-        riskPerTrade: 1
-      }
-    };
     
-    // Set user immediately
-    const event = new CustomEvent('setUser', { detail: demoUser });
-    window.dispatchEvent(event);
+    // Navigate to Trading History to see the saved trade
+    setTimeout(() => {
+      setCurrentView('history');
+    }, 500);
   };
 
   // Show loading while checking authentication
@@ -148,6 +142,16 @@ const TradingChecklistApp = () => {
     );
   }
 
+  // Show welcome page for new Google users
+  if (user && showWelcome) {
+    return (
+      <Welcome 
+        user={user}
+        onContinue={() => setShowWelcome(false)}
+      />
+    );
+  }
+
   // Show auth pages if not logged in
   if (!user) {
     console.log('No user found, showing auth pages. Auth view:', authView);
@@ -160,18 +164,6 @@ const TradingChecklistApp = () => {
             onSwitchToRegister={() => setAuthView('register')}
             onGoogleLogin={googleLogin}
           />
-          <div className="fixed bottom-6 left-0 right-0 text-center px-4">
-            <button
-              onClick={handleDemoLogin}
-              className="inline-flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-medium py-3 px-6 rounded-lg transition-all transform hover:scale-105 shadow-lg"
-            >
-              <BarChart3 size={20} />
-              Try Demo Dashboard
-            </button>
-            <p className="text-slate-400 text-sm mt-3 max-w-md mx-auto">
-              Experience the full trading dashboard with sample data. No registration required.
-            </p>
-          </div>
         </div>
       );
     } else {
@@ -276,7 +268,7 @@ const TradingChecklistApp = () => {
         <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
           <div className="flex items-center space-x-3">
             <div className="bg-gradient-to-br from-emerald-600 to-teal-600 p-2 rounded-lg shadow-lg">
-              <BarChart3 className="text-white" size={24} />
+              <TrendingUp className="text-white" size={24} />
             </div>
             <div>
               <h1 className="text-xl font-bold text-white">Trading Dashboard</h1>

@@ -1,42 +1,18 @@
 // src/utils/initSampleData.js
-import { generateSampleTrades } from '../services/mockBackend'
 
 export const initSampleData = () => {
   try {
     const data = localStorage.getItem('trading_app_shared_data')
 
     if (!data) {
-      console.log('No data found, creating fresh sample data...')
-
-      // Create demo user with specific ID
-      const demoUserId = 'demo_user_123'
-      const demoUser = {
-        id: demoUserId,
-        name: 'Demo Trader',
-        email: 'demo@trading.com',
-        password: 'demo123',
-        isVerified: true,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        authProvider: 'demo',
-        settings: {
-          theme: 'dark',
-          notifications: true,
-          defaultTimeframe: '1h',
-          riskPerTrade: 1,
-          defaultConfluenceThreshold: 50,
-        },
-      }
-
-      // Generate sample trades for this user
-      const sampleTrades = generateSampleTrades(demoUserId)
+      console.log('No data found, creating empty data structure...')
 
       const initialData = {
-        users: [demoUser],
+        users: [],
         verificationCodes: {},
-        trades: sampleTrades,
+        trades: [],
         dashboardSettings: {
-          userId: demoUserId,
+          userId: null,
           theme: 'dark',
           notifications: true,
         },
@@ -46,10 +22,7 @@ export const initSampleData = () => {
         'trading_app_shared_data',
         JSON.stringify(initialData)
       )
-      console.log('Fresh sample data created with:', {
-        userId: demoUserId,
-        trades: sampleTrades.length,
-      })
+      console.log('Empty data structure created')
       return initialData
     }
 
@@ -69,34 +42,67 @@ export const initSampleData = () => {
       parsed.trades = []
     }
 
-    // If no users, create demo user
-    if (parsed.users.length === 0) {
-      console.log('No users found, creating demo user...')
-      const demoUserId = 'demo_user_123'
-      parsed.users = [
-        {
-          id: demoUserId,
-          name: 'Demo Trader',
-          email: 'demo@trading.com',
-          password: 'demo123',
-          isVerified: true,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          authProvider: 'demo',
-          settings: {
-            theme: 'dark',
-            notifications: true,
-            defaultTimeframe: '1h',
-            riskPerTrade: 1,
-            defaultConfluenceThreshold: 50,
-          },
-        },
-      ]
+    // Ensure verificationCodes object exists
+    if (
+      !parsed.verificationCodes ||
+      typeof parsed.verificationCodes !== 'object'
+    ) {
+      console.log('No valid verificationCodes object found, creating...')
+      parsed.verificationCodes = {}
+    }
 
-      // If no trades, generate some for the demo user
-      if (parsed.trades.length === 0) {
-        console.log('Generating sample trades for demo user...')
-        parsed.trades = generateSampleTrades(demoUserId)
+    // If no users, that's fine - users must register
+    if (parsed.users.length === 0) {
+      console.log('No users found - waiting for user registration')
+    }
+
+    // CLEANUP: Remove all demo user trades and data
+    // Filter out demo user
+    parsed.users = parsed.users.filter(
+      (u) => u.email !== 'demo@trading.com' && u.id !== 'demo_user_123'
+    )
+
+    // Filter out all trades that belong to demo user
+    parsed.trades = parsed.trades.filter((t) => t.userId !== 'demo_user_123')
+
+    console.log('Cleaned up demo user data')
+
+    // Ensure at least one test user exists for email/password login testing
+    const testUserExists = parsed.users.some(
+      (u) => u.email === 'test@example.com'
+    )
+    if (!testUserExists) {
+      console.log('Creating test user for email/password login testing...')
+      const testUser = {
+        id: 'test_user_001',
+        name: 'Test User',
+        email: 'test@example.com',
+        password: 'test123', // Test password for development
+        isVerified: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        authProvider: 'email',
+        settings: {
+          theme: 'dark',
+          notifications: true,
+          defaultTimeframe: '1h',
+          riskPerTrade: 1,
+        },
+      }
+      parsed.users.push(testUser)
+      console.log('Test user created: test@example.com / test123')
+    } else {
+      // Remove any test user's sample trades
+      const testUserId = parsed.users.find(
+        (u) => u.email === 'test@example.com'
+      )?.id
+      if (testUserId) {
+        const beforeCount = parsed.trades.length
+        parsed.trades = parsed.trades.filter((t) => t.userId !== testUserId)
+        const removedCount = beforeCount - parsed.trades.length
+        if (removedCount > 0) {
+          console.log(`Removed ${removedCount} sample trades from test user`)
+        }
       }
     }
 
@@ -117,11 +123,8 @@ export const initSampleData = () => {
       }
     }
 
-    // If still no trades, generate some
-    if (parsed.trades.length === 0 && firstUserId) {
-      console.log('Generating sample trades...')
-      parsed.trades = generateSampleTrades(firstUserId)
-    }
+    // All users start with empty trade history
+    // They must manually save their own trades
 
     // Save back to localStorage
     localStorage.setItem('trading_app_shared_data', JSON.stringify(parsed))
@@ -136,30 +139,13 @@ export const initSampleData = () => {
   } catch (error) {
     console.error('Error initializing sample data:', error)
 
-    // Create minimal fallback data
-    const demoUserId = 'fallback_user_' + Date.now()
+    // Create empty fallback data
     const fallbackData = {
-      users: [
-        {
-          id: demoUserId,
-          name: 'Fallback User',
-          email: 'fallback@example.com',
-          password: 'password123',
-          isVerified: true,
-          createdAt: new Date().toISOString(),
-          authProvider: 'fallback',
-          settings: {
-            theme: 'dark',
-            notifications: true,
-            defaultTimeframe: '1h',
-            riskPerTrade: 1,
-          },
-        },
-      ],
+      users: [],
       verificationCodes: {},
       trades: [],
       dashboardSettings: {
-        userId: demoUserId,
+        userId: null,
         theme: 'dark',
         notifications: true,
       },
@@ -169,7 +155,7 @@ export const initSampleData = () => {
       'trading_app_shared_data',
       JSON.stringify(fallbackData)
     )
-    console.log('Created fallback data due to error')
+    console.log('Created empty fallback data due to error')
     return fallbackData
   }
 }
@@ -191,8 +177,8 @@ export const ensureUserHasTrades = (userId) => {
     const parsed = JSON.parse(data)
 
     // Check if user exists
-    const userExists = parsed.users?.some((u) => u.id === userId)
-    if (!userExists) {
+    const user = parsed.users?.find((u) => u.id === userId)
+    if (!user) {
       console.error('User not found:', userId)
       return false
     }
@@ -201,26 +187,10 @@ export const ensureUserHasTrades = (userId) => {
     const userTrades = parsed.trades?.filter((t) => t.userId === userId) || []
 
     if (userTrades.length === 0) {
-      console.log(
-        `No trades found for user ${userId}, generating sample trades...`
-      )
-
-      // Generate sample trades
-      const sampleTrades = generateSampleTrades(userId)
-
-      // Add to existing trades
-      parsed.trades = [...(parsed.trades || []), ...sampleTrades]
-
-      // Save back
-      localStorage.setItem('trading_app_shared_data', JSON.stringify(parsed))
-
-      console.log(
-        `Added ${sampleTrades.length} sample trades for user ${userId}`
-      )
-      return true
+      console.log(`User ${userId} has no trades yet (this is expected)`)
+    } else {
+      console.log(`User ${userId} has ${userTrades.length} trades`)
     }
-
-    console.log(`User ${userId} already has ${userTrades.length} trades`)
     return true
   } catch (error) {
     console.error('Error in ensureUserHasTrades:', error)

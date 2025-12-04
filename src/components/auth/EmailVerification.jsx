@@ -19,6 +19,12 @@ const EmailVerification = ({ email, onVerify, onBack, onResendCode }) => {
     console.log('EmailVerification: pendingVerification from sessionStorage:', pendingVerification);
     if (pendingVerification) {
       const data = JSON.parse(pendingVerification);
+      // Always reset state to ensure fresh code is loaded
+      setCode(['', '', '', '', '', '']);
+      setError('');
+      setSuccess('');
+      setIsVerified(false);
+      
       setVerificationCode(data.code);
       if (data.code && data.code.length === 6) {
         setCode(data.code.split(''));
@@ -26,7 +32,7 @@ const EmailVerification = ({ email, onVerify, onBack, onResendCode }) => {
       setEmailFailed(data.emailFailed || false);
       console.log('EmailVerification: Loaded verification code:', data.code, 'emailFailed:', data.emailFailed);
     }
-  }, []);
+  }, [email]);
 
   // Countdown timer for resend button
   useEffect(() => {
