@@ -57,6 +57,15 @@ const Register = ({ onRegister, onSwitchToLogin, onGoogleLogin, onVerify, onRese
     }
   }, [])
 
+  useEffect(() => {
+    // Surface any persisted registration errors (e.g., duplicate email) after a reload
+    const storedError = sessionStorage.getItem('registerError')
+    if (storedError) {
+      setError(storedError)
+      sessionStorage.removeItem('registerError')
+    }
+  }, [])
+
   const handleSubmit = async (e) => {
     e.preventDefault(); // Prevent default form submission
     console.log('Register: Form submitted');
@@ -111,6 +120,7 @@ const Register = ({ onRegister, onSwitchToLogin, onGoogleLogin, onVerify, onRese
       } else {
         console.log('Register: Registration failed:', result.error);
         setError(result.error || 'Registration failed. Please try again.');
+        sessionStorage.setItem('registerError', result.error || 'Registration failed. Please try again.')
         // Clear any old verification codes from sessionStorage
         sessionStorage.removeItem('pendingVerification');
         // Make sure we're not showing the verification screen

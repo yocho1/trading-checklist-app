@@ -66,6 +66,36 @@ export const registerUser = async (userData) => {
   // Check if user already exists
   const existingUser = data.users.find((user) => user.email === userData.email)
   if (existingUser) {
+    // If the user exists but is NOT verified, allow re-registration: refresh password/name and resend code
+    if (!existingUser.isVerified) {
+      console.log(
+        'registerUser: Unverified user re-registering, refreshing code for:',
+        userData.email
+      )
+      existingUser.password = userData.password
+      existingUser.name = userData.name || existingUser.name
+      existingUser.updatedAt = new Date().toISOString()
+
+      // Generate a fresh verification code and expiry
+      const verificationCode = Math.floor(
+        100000 + Math.random() * 900000
+      ).toString()
+      data.verificationCodes[userData.email] = {
+        code: verificationCode,
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      }
+
+      saveData(data)
+
+      return {
+        success: true,
+        message:
+          'Account exists but is not verified. A new verification code has been generated.',
+        userId: existingUser.id,
+        verificationCode,
+      }
+    }
+
     console.log('registerUser: User already exists with email:', userData.email)
     throw new Error('User with this email already exists')
   }
@@ -96,7 +126,7 @@ export const registerUser = async (userData) => {
   ).toString()
   data.verificationCodes[newUser.email] = {
     code: verificationCode,
-    expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // 30 minutes
+    expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 minutes
   }
 
   console.log(
@@ -278,7 +308,7 @@ export const resendVerificationCode = async (email) => {
   ).toString()
   data.verificationCodes[email] = {
     code: verificationCode,
-    expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+    expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
   }
 
   saveData(data)

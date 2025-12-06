@@ -9,6 +9,7 @@ import {
   logoutUser,
   checkAuth,
 } from '../services/mockBackend'
+import { emailService } from '../utils/emailService'
 
 export const useAuth = () => {
   const [user, setUser] = useState(null)
@@ -63,6 +64,9 @@ export const useAuth = () => {
     const initializeAuth = async () => {
       try {
         console.log('Initializing authentication...')
+
+        // Initialize EmailJS if configured (needed before sending)
+        emailService.init()
 
         // First, try to get last logged-in user (not demo user)
         const lastUser = getLastLoggedInUser()
@@ -149,11 +153,39 @@ export const useAuth = () => {
       const result = await registerUser(userData)
       console.log('Registration successful, user ID:', result.userId)
 
+      // Attempt to send verification email when we have a code
+      let emailSent = false
+      let emailError = null
+      if (result.verificationCode) {
+        const expiresAt = Date.now() + 15 * 60 * 1000 // 15 minutes
+        try {
+          const sendResult = await emailService.sendVerificationCode(
+            email,
+            result.verificationCode,
+            name,
+            expiresAt
+          )
+          emailSent = !!sendResult.success
+          emailError = sendResult.success
+            ? null
+            : sendResult.error || sendResult.details || 'Email failed'
+          if (!emailSent) {
+            console.warn('Verification email not sent:', emailError)
+          }
+        } catch (sendErr) {
+          console.warn('Verification email send threw:', sendErr)
+          emailSent = false
+          emailError = sendErr?.message || 'Email failed'
+        }
+      }
+
       return {
         success: true,
         userId: result.userId,
         verificationCode: result.verificationCode,
         email: email,
+        emailSent,
+        emailError,
       }
     } catch (error) {
       console.error('Registration failed:', error.message)
@@ -259,6 +291,10 @@ export const useAuth = () => {
 
       // Clear the saved current user
       localStorage.removeItem('currentUser')
+
+      // Clear pending verification data so register form is fresh
+      sessionStorage.removeItem('pendingVerification')
+      sessionStorage.removeItem('registerError')
 
       setError(null)
       console.log('Logout successful')

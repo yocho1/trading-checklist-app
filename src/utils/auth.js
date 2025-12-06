@@ -150,7 +150,7 @@ const auth = {
 
       // Generate verification code
       const verificationCode = generateVerificationCode()
-      const expiresAt = Date.now() + 30 * 60 * 1000 // 30 minutes
+      const expiresAt = Date.now() + 15 * 60 * 1000 // 15 minutes
 
       // Store verification data in sessionStorage
       const verificationData = {
@@ -505,7 +505,7 @@ const auth = {
 
       // Generate new verification code
       const verificationCode = generateVerificationCode()
-      const expiresAt = Date.now() + 30 * 60 * 1000 // 30 minutes
+      const expiresAt = Date.now() + 15 * 60 * 1000 // 15 minutes
 
       // Update verification data
       const newVerificationData = {
@@ -647,7 +647,7 @@ const auth = {
 
       // Generate verification code
       const code = generateVerificationCode()
-      const expiresAt = Date.now() + 30 * 60 * 1000 // 30 minutes
+      const expiresAt = Date.now() + 15 * 60 * 1000 // 15 minutes
 
       // Store in sessionStorage
       sessionStorage.setItem(
@@ -758,7 +758,7 @@ const auth = {
 
       const request = JSON.parse(pendingEmailChange)
       const code = generateVerificationCode()
-      const expiresAt = Date.now() + 30 * 60 * 1000
+      const expiresAt = Date.now() + 15 * 60 * 1000
 
       // Update session storage
       sessionStorage.setItem(
