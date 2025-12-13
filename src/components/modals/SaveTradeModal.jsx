@@ -4,8 +4,10 @@ import { X, Upload, Save, AlertCircle } from 'lucide-react';
 import CurrencyPairSelector from './CurrencyPairSelector';
 import { useTradeCalculations } from '../../hooks/useTradeCalculations';
 import auth from '../../utils/auth';
+import { mockBackend } from '../../utils/mockBackend';
 import { tradeService } from '../../services/tradeService';
 import { supabase } from '../../services/supabaseClient';
+import { calculateTradeParameters } from '../../utils/calculations';
 
 const SaveTradeModal = ({ isOpen, onClose, confluenceScore, onTradeSaved }) => {
   const [formData, setFormData] = useState({
@@ -103,9 +105,10 @@ const SaveTradeModal = ({ isOpen, onClose, confluenceScore, onTradeSaved }) => {
       let result;
       
       if (hasSupabaseSession) {
+        console.log('Saving to Supabase...');
         result = await tradeService.createTrade(tradeData);
       } else {
-        // Fallback: Save to localStorage
+        // For demo/offline mode: fallback to localStorage
         console.log('No Supabase session, saving to localStorage for user:', user.id);
         try {
           const data = localStorage.getItem('trading_app_shared_data');
@@ -119,6 +122,22 @@ const SaveTradeModal = ({ isOpen, onClose, confluenceScore, onTradeSaved }) => {
             updatedAt: new Date().toISOString()
           };
           
+          // Ensure all required fields for P&L calculation are present
+          if (!newTrade.risk_amount || newTrade.risk_amount === 0) {
+            const params = calculateTradeParameters({
+              accountBalance: formData.accountBalance,
+              riskPercentage: formData.riskPercentage,
+              entryPrice: formData.entryPrice,
+              stopLossPrice: formData.stopLossPrice,
+              currencyPair: formData.currencyPair,
+            })
+            newTrade.risk_amount = params.riskAmount
+            newTrade.stop_loss_pips = params.stopLossPips
+            if (!newTrade.position_size || newTrade.position_size === 0) {
+              newTrade.position_size = params.lotSize
+            }
+          }
+          
           console.log('New trade object:', newTrade);
           console.log('Current trades count before save:', parsed.trades?.length || 0);
           
@@ -127,7 +146,11 @@ const SaveTradeModal = ({ isOpen, onClose, confluenceScore, onTradeSaved }) => {
           
           console.log('Trades count after adding:', parsed.trades.length);
           
-          localStorage.setItem('trading_app_shared_data', JSON.stringify(parsed));
+          const saved = mockBackend.saveSharedData(parsed);
+          if (!saved) {
+            // Try saving only trades via helper to apply pruning
+            mockBackend.saveTrades(parsed.trades);
+          }
           console.log('Trade saved to localStorage successfully');
           
           result = { success: true, trade: newTrade };
@@ -162,7 +185,7 @@ const SaveTradeModal = ({ isOpen, onClose, confluenceScore, onTradeSaved }) => {
         
         // Don't reload - let the parent handle navigation/refresh
       } else {
-        setError(`Failed to save trade: ${result.error}`);
+        setError(`Failed to save trade: ${result.error || 'Storage quota exceeded. Try removing older trades or connect Supabase.'}`);
       }
     } catch (error) {
       console.error('Error saving trade:', error);

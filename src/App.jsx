@@ -96,6 +96,16 @@ const TradingChecklistApp = () => {
     setCheckedItems(initialChecked);
   }, []);
 
+  const resetChecklist = () => {
+    const initialChecked = {};
+    CHECKLIST_DATA.forEach((section) => {
+      section.items.forEach((item) => {
+        initialChecked[item.id] = false;
+      });
+    });
+    setCheckedItems(initialChecked);
+  };
+
   const handleToggle = (id) => {
     setCheckedItems((prev) => ({
       ...prev,
@@ -122,6 +132,8 @@ const TradingChecklistApp = () => {
       addNewTrade(newTrade);
     }
     refreshData(); // Refresh dashboard data
+    // Reset checklist to default unchecked state after saving a trade
+    resetChecklist();
     
     // Navigate to Trading History to see the saved trade
     setTimeout(() => {

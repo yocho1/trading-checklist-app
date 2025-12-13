@@ -470,6 +470,29 @@ const auth = {
         emailVerified: true,
       }
 
+      // Sync user profile in public.users table
+      try {
+        const { data: existingProfile } = await supabase
+          .from('users')
+          .select('*')
+          .eq('auth_user_id', user.id)
+          .single()
+
+        if (!existingProfile) {
+          // Create new profile
+          await supabase.from('users').insert({
+            auth_user_id: user.id,
+            email: user.email,
+            name: userData.name,
+            is_verified: true,
+          })
+          console.log('auth.login: User profile created in Supabase')
+        }
+      } catch (supabaseError) {
+        console.warn('Could not sync user profile:', supabaseError)
+        // Continue anyway - Supabase session is still valid
+      }
+
       localStorage.setItem(
         'tradingToken',
         btoa(

@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Filter, Search, Edit, Trash2, Eye, ArrowLeft, BarChart3 } from 'lucide-react';
 import { tradeService } from '../services/tradeService';
+import { mockBackend } from '../utils/mockBackend';
 
 const TradingHistory = () => {
   const [trades, setTrades] = useState([]);
@@ -143,22 +144,17 @@ const TradingHistory = () => {
         // Reload statistics
         loadStatistics();
       } else {
-        // Fallback to update in localStorage
+        // Fallback to update in localStorage using new P&L-aware function
         console.log('Supabase unavailable, updating trade status in localStorage...');
         try {
-          const data = localStorage.getItem('trading_app_shared_data');
-          if (data) {
-            const parsed = JSON.parse(data);
-            const tradeIndex = (parsed.trades || []).findIndex(t => t.id === id);
-            if (tradeIndex >= 0) {
-              parsed.trades[tradeIndex].status = newStatus;
-              parsed.trades[tradeIndex].updatedAt = new Date().toISOString();
-              localStorage.setItem('trading_app_shared_data', JSON.stringify(parsed));
-              setTrades(prev => prev.map(trade => 
-                trade.id === id ? { ...trade, status: newStatus } : trade
-              ));
-              loadStatistics();
-            }
+          const success = mockBackend.updateTradeStatus(id, newStatus);
+          if (success) {
+            const data = mockBackend.getSharedData();
+            const updatedTrade = (data.trades || []).find(t => t.id === id);
+            setTrades(prev => prev.map(trade => 
+              trade.id === id && updatedTrade ? updatedTrade : trade
+            ));
+            loadStatistics();
           }
         } catch (localError) {
           console.error('Error updating trade status in localStorage:', localError);

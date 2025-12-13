@@ -10,6 +10,8 @@ import {
   checkAuth,
 } from '../services/mockBackend'
 import { emailService } from '../utils/emailService'
+import auth from '../utils/auth'
+import { supabase } from '../services/supabaseClient'
 
 export const useAuth = () => {
   const [user, setUser] = useState(null)
@@ -68,7 +70,27 @@ export const useAuth = () => {
         // Initialize EmailJS if configured (needed before sending)
         emailService.init()
 
-        // First, try to get last logged-in user (not demo user)
+        // First, check for Supabase session
+        const {
+          data: { session },
+        } = await supabase.auth.getSession()
+
+        if (session) {
+          // User has a Supabase session
+          console.log('Found Supabase session for:', session.user.email)
+          const supabaseUser = {
+            id: session.user.id,
+            email: session.user.email,
+            name: session.user.user_metadata?.name || 'User',
+            isVerified: true,
+            supabaseAuth: true,
+          }
+          setUser(supabaseUser)
+          setLoading(false)
+          return
+        }
+
+        // If no Supabase session, check for last logged-in user
         const lastUser = getLastLoggedInUser()
 
         if (lastUser) {
@@ -111,28 +133,22 @@ export const useAuth = () => {
     setError(null)
 
     try {
-      console.log('Attempting login for:', email)
+      console.log('Attempting Supabase login for:', email)
 
-      // First check if user is already logged in with same email
-      const currentUser = localStorage.getItem('currentUser')
-      if (currentUser) {
-        const parsedUser = JSON.parse(currentUser)
-        if (parsedUser.email === email && parsedUser.isVerified) {
-          console.log('User already logged in, restoring from localStorage')
-          setUser(parsedUser)
-          return { success: true }
-        }
+      // Use Supabase auth to login
+      const result = await auth.login(email, password)
+
+      if (!result.success) {
+        throw new Error(result.error || 'Login failed')
       }
 
-      // Otherwise, perform normal login
-      const result = await loginUser(email, password)
-      console.log('Login successful:', result.user.email)
+      const user = result.user
+      setUser(user)
 
-      setUser(result.user)
+      // Save as current user
+      localStorage.setItem('currentUser', JSON.stringify(user))
 
-      // Save this user as the current logged-in user
-      localStorage.setItem('currentUser', JSON.stringify(result.user))
-
+      console.log('Supabase login successful:', user.email)
       return { success: true }
     } catch (error) {
       console.error('Login failed:', error.message)
@@ -286,6 +302,14 @@ export const useAuth = () => {
 
     try {
       console.log('Logging out user:', user?.email)
+
+      // Log out from Supabase if authenticated
+      if (user?.supabaseAuth) {
+        await supabase.auth.signOut()
+        console.log('Supabase logout successful')
+      }
+
+      // Also clean up localStorage
       await logoutUser()
       setUser(null)
 

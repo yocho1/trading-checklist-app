@@ -22,11 +22,13 @@ import {
   Activity,
   TrendingUp as TrendingUpIcon
 } from 'lucide-react';
+import { exportTradesJSON, exportTradesCSV } from '../utils/export';
 
-const Dashboard = ({ data, loading, onRefresh, addNewTrade }) => {
+const Dashboard = ({ data, loading, onRefresh, addNewTrade, getBaseline, setBaseline }) => {
   const [timeframe, setTimeframe] = useState('all');
   const [selectedMetric, setSelectedMetric] = useState('pnl');
   const [lastRefresh, setLastRefresh] = useState(new Date());
+  const [baselineInput, setBaselineInput] = useState(getBaseline?.() || '');
 
   // Update last refresh time
   useEffect(() => {
@@ -162,6 +164,11 @@ const Dashboard = ({ data, loading, onRefresh, addNewTrade }) => {
                 • Last updated: {formatTimeSince(new Date(data.lastUpdated))}
               </span>
             )}
+            {data.dataSource && (
+              <span className="ml-2 px-2 py-0.5 text-xs rounded-full border border-slate-700 bg-slate-800 text-slate-300">
+                {data.dataSource === 'supabase' ? 'Supabase' : 'Local'}
+              </span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-4">
@@ -193,10 +200,26 @@ const Dashboard = ({ data, loading, onRefresh, addNewTrade }) => {
               {loading ? 'Refreshing...' : 'Refresh'}
             </button>
             
-            <button className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-300 px-3 py-2 rounded-lg transition-colors">
-              <Download size={16} />
-              Export
-            </button>
+            <div className="relative group">
+              <button className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-300 px-3 py-2 rounded-lg transition-colors">
+                <Download size={16} />
+                Export
+              </button>
+              <div className="absolute right-0 mt-2 hidden group-hover:block bg-slate-800 border border-slate-700 rounded-lg shadow-lg">
+                <button
+                  onClick={() => exportTradesJSON(filteredTrades, 'trades.json')}
+                  className="block w-full text-left px-4 py-2 text-slate-300 hover:bg-slate-700"
+                >
+                  Export JSON
+                </button>
+                <button
+                  onClick={() => exportTradesCSV(filteredTrades, 'trades.csv')}
+                  className="block w-full text-left px-4 py-2 text-slate-300 hover:bg-slate-700"
+                >
+                  Export CSV
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -225,6 +248,44 @@ const Dashboard = ({ data, loading, onRefresh, addNewTrade }) => {
           <div className="text-slate-500 text-xs mt-2">
             {metrics.winningTrades} winning, {metrics.losingTrades} losing trades
           </div>
+        </div>
+
+        {/* ROI */}
+        <div className="bg-slate-800 rounded-xl p-6 border border-slate-700 shadow-lg">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-white">ROI</h3>
+            <Percent className={`${metrics.roi >= 0 ? 'text-emerald-400' : 'text-red-400'}`} size={24} />
+          </div>
+          <div className="mb-4">
+            <div className={`text-3xl font-bold ${metrics.roi >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              {data?.baseline ? `${metrics.roi >= 0 ? '+' : ''}${metrics.roi.toFixed(1)}%` : 'N/A'}
+            </div>
+            <div className="text-slate-400 text-sm mt-1">
+              {data?.baseline ? `Base: $${data.baseline.toFixed(2)}` : 'Set baseline to compute'}
+            </div>
+          </div>
+          {!data?.baseline && (
+            <div className="flex gap-2">
+              <input
+                type="number"
+                placeholder="Starting balance"
+                value={baselineInput}
+                onChange={(e) => setBaselineInput(e.target.value)}
+                className="flex-1 px-2 py-1 bg-slate-700 text-slate-300 text-sm rounded border border-slate-600"
+              />
+              <button
+                onClick={() => {
+                  if (baselineInput) {
+                    setBaseline?.(parseFloat(baselineInput))
+                    setBaselineInput('')
+                  }
+                }}
+                className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded"
+              >
+                Set
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Win Rate */}
@@ -281,7 +342,7 @@ const Dashboard = ({ data, loading, onRefresh, addNewTrade }) => {
           </div>
           <div className="mb-2">
             <div className={`text-3xl font-bold ${metrics.averageConfluence >= 50 ? 'text-emerald-400' : 'text-red-400'}`}>
-              {metrics.averageConfluence}%
+              {Number(metrics.averageConfluence).toFixed(1)}%
             </div>
             <div className="text-slate-400 text-sm mt-1">
               Setup quality indicator
@@ -507,26 +568,35 @@ const Dashboard = ({ data, loading, onRefresh, addNewTrade }) => {
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {Object.entries(data.performance).map(([timeframe, stats]) => (
-            <div key={timeframe} className="bg-slate-700/30 rounded-lg p-4 hover:bg-slate-700/50 transition-colors">
-              <div className="flex items-center justify-between mb-3">
-                <div className="text-slate-300 font-medium capitalize">{timeframe}</div>
-                {stats.pnl >= 0 ? (
-                  <ArrowUpRight className="text-emerald-400" size={18} />
-                ) : (
-                  <ArrowDownRight className="text-red-400" size={18} />
-                )}
-              </div>
-              <div>
-                <div className={`text-2xl font-bold ${stats.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                  ${stats.pnl.toFixed(2)}
+          {Object.entries(data.performance || {}).map(([timeframe, stats]) => {
+            const isPositive = stats.pnl >= 0
+            return (
+              <div key={timeframe} className="bg-slate-700/30 rounded-lg p-4 hover:bg-slate-700/50 transition-colors">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-slate-300 font-medium capitalize">{timeframe}</div>
+                  {isPositive ? (
+                    <ArrowUpRight className="text-emerald-400" size={18} />
+                  ) : (
+                    <ArrowDownRight className="text-red-400" size={18} />
+                  )}
                 </div>
-                <div className="text-slate-400 text-sm mt-2">
-                  {stats.trades} trades • {stats.winRate}% WR
+                <div>
+                  <div className={`text-2xl font-bold ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
+                    ${stats.pnl.toFixed(2)}
+                  </div>
+                  <div className="text-slate-400 text-sm mt-2">
+                    {stats.trades} trades
+                  </div>
+                </div>
+                <div className="flex items-end justify-center h-12 gap-1 mt-3">
+                  <div
+                    className={`w-full rounded-sm transition-all ${isPositive ? 'bg-emerald-400/50' : 'bg-red-400/50'}`}
+                    style={{ height: `${Math.max(Math.min(Math.abs(stats.pnl) / 20, 48), 8)}px` }}
+                  ></div>
                 </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
 

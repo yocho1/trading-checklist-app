@@ -142,3 +142,55 @@ export const calculateTradeParameters = (formData) => {
     lotSize: lotSize > 0.001 ? lotSize : 0,
   }
 }
+
+// Calculate realized P&L based on entry, exit, direction, lot size and pair
+export const calculatePnl = ({
+  entryPrice,
+  exitPrice,
+  direction,
+  lotSize,
+  currencyPair,
+}) => {
+  const entry = parseFloat(entryPrice)
+  const exit = parseFloat(exitPrice)
+  const size = parseFloat(lotSize)
+  if (isNaN(entry) || isNaN(exit) || isNaN(size) || size <= 0) return 0
+
+  // Pip difference according to pair conventions
+  let pipDiff
+  if (
+    currencyPair &&
+    (currencyPair.includes('XAU') || currencyPair.includes('XAG'))
+  ) {
+    pipDiff = Math.round(Math.abs(exit - entry) * 100)
+  } else if (currencyPair && currencyPair.includes('JPY')) {
+    pipDiff = Math.round(Math.abs(exit - entry) * 100)
+  } else {
+    pipDiff = Math.round(Math.abs(exit - entry) * 10000)
+  }
+
+  // Pip value per lot
+  let pipValue
+  if (currencyPair && currencyPair.includes('XAU')) {
+    pipValue = 1 // $1 per pip for gold assumed
+  } else if (currencyPair && currencyPair.includes('XAG')) {
+    pipValue = 50 // $50 per pip for silver assumed
+  } else {
+    pipValue = PIP_VALUES[currencyPair] || 10
+  }
+
+  const gross = pipDiff * pipValue * size
+  const isLong = (direction || '').toUpperCase() === 'LONG'
+  const isShort = (direction || '').toUpperCase() === 'SHORT'
+  if (!isLong && !isShort) return 0
+
+  const priceChangePositive = exit >= entry
+  let result
+  if (isLong) {
+    result = priceChangePositive ? gross : -gross
+  } else {
+    // short
+    result = priceChangePositive ? -gross : gross
+  }
+  return Math.round(result * 100) / 100
+}
